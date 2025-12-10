@@ -8,12 +8,12 @@ In other words, Nowhere Network will provide anonymity on the TCP/IP layer at al
 
 ```
 DOING:
--Phase 0: (Visualizing)
+-Phase 1: (Visualizing)
     - Brainstorming how the network should work and it's features (to defend against all threats)
     - Brainstorming the threat model (Passive, Active and Forceful adversaries)
 
 TODO:
--Phase 1: (Testing the Proof of Concepts)
+-Phase 1.5: (Testing the Proof of Concepts)
     - Making a barebones binary with local socks5 proxying and tcp port binding to further explain the threat model (and what the adversary can see)
     - Making PoCs of the critical features of the network to clarify what's possible and what's not possible:
         - Vanity v3 hidden service names, with easy retrieval of hidden services' public keys (the hidden service name alone should be enough to get the public key of a hidden service, to encrypt traffic with it)

@@ -1,8 +1,8 @@
-# Nowhere-Network (WIP)
+# Datura Network (WIP)
 
-Nowhere Network is a new Darknet (like Tor or I2P), that is going to be written in rust. It will be designed in such a way that state-level threats of passive network analysis, and active sybil attacks are rendered useless to conduct against it's defenses. 
+Datura Network is a new Darknet (like Tor or I2P), that is going to be written in rust. It will be designed in such a way that state-level threats of passive network analysis, and active sybil attacks are rendered useless to conduct against it's defenses. 
 
-In other words, Nowhere Network will provide anonymity on the TCP/IP layer at all costs, while maintaining usability of the network.
+In other words, Datura Network will provide anonymity on the TCP/IP layer at all costs, while maintaining usability of the network.
 
 # Roadmap:
 

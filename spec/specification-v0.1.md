@@ -29,6 +29,7 @@ Disruptive adversary threats include malicious actions that the adversary does t
 The main goal of the network is to ensure that Client A can communicate to Server B without revealing either the identity (IP address) of client A to Server B, nor the revealing the identity (IP address) of Server B to Client A, because either client A or Server B could also be the adversary. The Anonymity provided by the network must be bi-directionnal, and on the IP layer (Both TCP and UDP).
 
 To provide anonymity on the IP layer, the network must:
+
 - Defeat all passive adversary threats, including traffic correlation attacks.
 - Defeat all active adversary threats, including sybil attacks
 
@@ -66,13 +67,13 @@ You can be behind a NAT (like at home behind a router), running the datura daemo
 
 Nodes always connect to one another using two uni-directionnal streams:
 
-A -> B -> C -> D -> E (A sends traffic to E via B,C and D)
-A <- H <- G <- F <- E (E responds to A via F, G and H)
+- A -> B -> C -> D -> E (A sends traffic to E via B,C and D)
+- A <- H <- G <- F <- E (E responds to A via F, G and H)
 
 The path length varies at random, to add uncertainty (for an external observer), as to which node is the source, and which node is the destination:
 
-A -> B -> C -> D -> E (minimal path length = 3 hops)
-A -> B -> C -> D -> I -> J -> K -> L -> E (maximum path length = 7 hops)
+- A -> B -> C -> D -> E (minimal path length = 3 hops)
+- A -> B -> C -> D -> I -> J -> K -> L -> E (maximum path length = 7 hops)
 
 the path length of each connection is chosen at random.
 
@@ -86,10 +87,10 @@ Each Node has a private key and a public key pair. The public Key is used by eve
 
 As a node, you will only accept to route traffic for other nodes if they manage to solve a randomX challenge which you set. 
 
-A -> E : "Hey E, route traffic for me!"
-A <- E : "i'll do it only if you solve this randomx challenge A!"
-A -> E : "Ok here's the randomX solution!" (E now unlocks the bandwidth from A to E to be 1mbps instead of 10kbps)
-A <- E : "Ok valid answer, i accept to route 1gb of traffic for you, at 1mbps!"
+- A -> E : "Hey E, route traffic for me!"
+- A <- E : "i'll do it only if you solve this randomx challenge A!"
+- A -> E : "Ok here's the randomX solution!" (E now unlocks the bandwidth from A to E to be 1mbps instead of 10kbps)
+- A <- E : "Ok valid answer, i accept to route 1gb of traffic for you, at 1mbps!"
 
 ### Clients choose where their connections go, including which Nodes are used as Decoy Destinations
 

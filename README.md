@@ -2,9 +2,11 @@
 
 Datura Network is a new Darknet (like Tor or I2P), that is going to be written in rust. It will be designed in such a way that state-level threats of passive network analysis, and active sybil attacks are rendered useless to conduct against it's defenses. 
 
-In other words, Datura Network will provide anonymity on the TCP/IP layer at all costs, while maintaining usability of the network.
+![alt text](image.png)
 
-# Roadmap:
+In other words, Datura Network will provide anonymity on the TCP/IP layer at all costs, while maintaining usability of the network, we're going to implement every feature the other anonymity networks should've implemented by now.
+
+# Roadmap (DRAFT):
 
 ```
 DOING:

@@ -31,7 +31,7 @@ fn validate_solution(vm: &RandomXVM, challenge: [u8; 16], solution: u64) -> bool
 }
 
 fn solve_challenge(vm: &RandomXVM, challenge: [u8; 16]) -> u64 {
-    let mut solution: u64 = 0;
+    let mut solution = getrandom::u64().unwrap();
     loop {
         if validate_solution(vm, challenge, solution) { return solution };
 
@@ -56,7 +56,7 @@ fn main() {
         let now = std::time::Instant::now();
         println!("solving challenge {:02X?}", challenge);
         let solution = solve_challenge(&vm, challenge);
-        println!("took {:.2?} ({} tries) to find solution", now.elapsed(), solution+1);
+        println!("took {:.2?} to find solution ({:X?})", now.elapsed(), solution);
         
         let now = std::time::Instant::now();
         assert!(validate_solution(&vm, challenge, solution));

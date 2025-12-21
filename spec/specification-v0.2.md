@@ -1,4 +1,4 @@
-# Datura Network Specification v0.1 (DRAFT)
+# Datura Network Specification v0.2 (DRAFT)
 
 ## Threat Model
 
@@ -6,9 +6,13 @@ The threat landscape that is in scope spans the following 3 categories:
 
 ### Passive Adversary Threats (Traffic Correlation Attacks)
 
-Passive adversary threats include for example a malicious Internet Service Provider logging connections to perform traffic correlation attacks. By looking at shape of the traffic coming from the source, and by looking at the shape of the traffic on the other end, the adversary may be able to determine that the source is actually communicating with that destination.
+Global Passive Adversary (GPA) threats include multiple malicious Internet Service Provider logging connections to perform traffic correlation attacks. By looking at shape of the traffic coming to and from all nodes, the adversary may be able to determine that a given source client is actually communicating with that service destination, to be able to deanonymize them.
 
-The shape of the traffic (the size of the packets, the amount of data being sent, the timing at which each packet is sent, the destination as of where the packets are going), these are all characteristics that the adversary can use to deanonymize users based on their traffic patterns.
+![alt text](image-24.png)
+
+![alt text](image-33.png)
+
+The shape of the traffic (the size of the packets, **and especially the amount of data being sent and recieved**, the timing at which each packet is sent, the destination as of where the packets are going), these are all characteristics that the adversary can use to deanonymize users based on their traffic patterns.
 
 The connection/traffic logging is also long-lived, and can span several months, and can be used to correlate that client A communicated with server B.
 
@@ -22,7 +26,9 @@ The Active adversary tries to run as many nodes as possible on the network to tr
 
 ### Disruptive Adversary Threats (DDoS Attacks)
 
-Disruptive adversary threats include malicious actions that the adversary does to harm the usability of the network, either to slow down it's performance, or to bring it to a complete halt, which would effectively prevent client A from communicating to server B.
+![alt text](image-34.png)
+
+Disruptive adversary threats include malicious actions that the adversary does to harm the usability of the network, either to slow down it's performance, or to bring it to a complete halt, which would effectively prevent client A from communicating to server B. It also includes malicious clients and Malicious Hidden Services trying to take one another offline.
 
 ## Goals of the Network
 
@@ -107,7 +113,7 @@ Every node along the way does not know what the traffic they recieve is for, unt
     - or that node was the intended destination and they process the request.
 - Or else if the node can't decrypt the traffic and discard it as decoy traffic.
 
-TODO: Important sidenote, should these decoy destinations are remembered on the clientside for future use ? because long-term passive traffic correllation attacks are in scope in the threat model. If an adversary can monitor the traffic activity of all nodes on the network (from an external point of view), in case of decoy / hop nodes constantly changing, the only point in common over time of the connections would be Node A and Node I.
+Important sidenote, **these decoy destinations are remembered on the clientside for future use, because long-term passive traffic correllation attacks are in scope in the threat model.** If an adversary can monitor the traffic activity of all nodes on the network (from an external point of view), in case of decoy / hop nodes constantly changing, the only point in common over time of the connections would be Node A and Node I.
 
 ### Nodes limit the bandwidth usage of other nodes to 10kbps by default, until they solve their PoW challenge.
 
@@ -248,11 +254,93 @@ In order for clients to recieve responses from hidden services, they have to tel
 
 Therefore in the same fashion that hidden services pick a rendezvous node to be able to recieve traffic that's meant for them, we have clients choosing rendezvous nodes to be able to recieve traffic that's meant for them, coming from hidden service destinations, allowing them to remain anonymous from a potentially malicious hidden service.
 
-![alt text](image-21.png)
+![alt text](image-22.png)
 
 to recapitulate, Client nodes connect to a rendezvous node chosen by the hidden service to forward their requests to the hidden service, and the hidden service connects to a rendezvous node chosen by the client to forward their responses back to the client.
 
-Effectively preserving the bi-directionnal anonymity, from clientside to serverside.
+Effectively preserving the bi-directionnal anonymity, from clientside to serverside, using unidirectionnal streams.
+
+### Decoy Destinations and Decoy Sources
+
+#### The Justification behind Decoy Destinations and Decoy Sources:
+
+![alt text](image-24.png)
+
+As it was said previously in the threat model, the malicious client Node A with the capability of a global passive adversary will try to correlate the amount of data they send to a given hidden service, and the amount of data that is being received by other nodes on the network.
+
+Over time, if the adversary sends 100Gb of data to one hidden service, and the only node to have received that 100Gb of data is Node B, **then the adversary would have successfully deanonymized the hidden service as being on Node B.** Therefore, Node B can't be the only one to receive 100Gb of data and send 50Gb of response data over time. **This is the main justification behind the Decoy Destinations feature.**
+
+The opposite also holds true, you can't let a malicious hidden service operator deanonymize clients:
+
+![alt text](image-25.png)
+
+A malicious hidden service operator is also able to know that they received 100Gb and sent 50Gb worth of traffic, and if they have the monitoring capability of a global passive adversary, then they could be able to deanonymize a given client, (if they were the sole client that visited the hidden service), **which justifies our Decoy Sources feature.**
+
+#### The connection Layout of the Decoy Destinations and Sources:
+
+![alt text](image-26.png)
+
+in the center we have our client and server, Client Node A, and Hidden service Node B. 
+
+Client Node A paid (in PoW), for a total of 20 nodes, including all of the nodes on the bottom half of the graph and RDV Node D11 to ensure that Decoy Source Nodes 12 to 18:
+
+ - receive the same traffic that Client Node A receives (even though only Client Node A can decrypt it)
+ - send the same traffic shape that Client Node A sends
+
+in the upper half of the graph we have the 20 nodes that the hidden service Node B also paid for (in PoW) which includes RDV Node D1, to ensure that Decoy Destination Nodes 2 to 8:
+
+- receive the same traffic that Hidden Service Node B receives (even though only Hidden Service Node B can decrypt it)
+- send the same traffic shape that Hidden Service Node B sends
+
+#### Decoy Sources: The Sequence to send requests to hidden services:
+
+The sequence to send requests to hidden services is as follows:
+
+![alt text](image-27.png)
+
+1) First, Alice sends traffic to her Node via localhost, to be able to determine what the traffic she wants to send to Bob must look like to a Global Passive Adversary (GPA)
+
+![alt text](image-28.png)
+
+2) Alice sends the information of what the traffic must look like to RDV Node D11, by going through RDV Node D1
+3) RDV Node D1, (which was chosen by the hidden service node B), routes the traffic to the decoy destinations
+4) All decoy destination nodes recieve the packet and are told to forward it back to the RDV node chosen by the client
+5) RDV Node D11, (which was chosen by the client A), forwards the message back to the decoy sources to tell them what the traffic they must send looks like
+6) all 8 sources (7 decoy sources, 1 real source), are told what the traffic they must send looks like, so they send it (only 1 traffic is real, the 7 others just send noise traffic that looks exactly the same from the outside)
+
+![alt text](image-29.png)
+
+7) now that all 8 sources are told what the traffic they must send looks like, they all send it to RDV node D1
+8) RDV Node D1 forwards the real traffic to all 8 Decoy Destinations (and discards the 7 other noise traffic)
+9) All 8 destinations recieve the same traffic
+
+End result: is that if Node B is a malicious hidden service with the monitoring capability of a global passive adversary, Client A is not deanonymizing themselves with their bandwidth consumption to that adversary because there is always an anonymity set of 1 out of 8 possible sources (7 of which are decoy sources), that have sent the same amount of traffic to the RDV node D1 (which was chosen by the hidden service).
+
+#### Decoy Destinations: The Sequence to receive responses from hidden services:
+
+To receive responses from hidden services, the sequence is the same except that it starts with the Hidden Service instead:
+
+![alt text](image-30.png)
+
+10) Bob sends traffic to his Node via localhost, to be able to determine what the traffic she wants to back send to  Alice must look like to a Global Passive Adversary (GPA)
+
+![alt text](image-31.png)
+
+11) Bob sends the information as to how the traffic should look like to RDV Node D11
+12) RDV Node D11 forwards the traffic information to all 8 sources
+13) the decoy sources are tasked to route the traffic back to RDV node D1
+14) RDV Node D1 routes the traffic information back to all Destination Nodes
+
+![alt text](image-32.png)
+
+15) all Decoy Destinations recieved the information of how the response traffic should look like, so they send traffic that looks exactly like the real response from Node B
+16) All sources recieve the hidden service response, via RDV Node D11.
+
+End result: even if client Node A is a malicious adversary with the capabilities of a global passive adversary, they can't deanonymize Hidden service Node B via their bandwidth consumption because they always have an anonymity set of 1 out of 8 possible destinations (7 of which are decoy destinations), all 8 destinations have sent 50 Gb of traffic, and all 8 destinations have received 100Gb of traffic.
+
+#### Bonus: Decoy Sources and Destinations combined with probabilistic path lengths:
+
+![alt text](image-35.png)
 
 ### TODO: Exit Nodes to access the clearnet 
 

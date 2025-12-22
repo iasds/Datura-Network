@@ -1,10 +1,39 @@
 # Datura Network (WIP)
 
-Datura Network is a new Darknet (like Tor or I2P), that is going to be written in rust. It will be designed in such a way that state-level threats of passive network analysis, and active sybil attacks are rendered useless to conduct against it's defenses. 
+Datura Network is going to be a new Darknet (like [Tor](http://opbible7nans45sg33cbyeiwqmlp5fu7lklu6jd6f3mivrjeqadco5yd.onion/opsec/torhoneypot/) or I2P), that is going to be written in rust. It will be designed in such a way that state-level threats of passive network analysis, active sybil attacks and disruptive DDoS attacks are rendered useless to conduct against it's very design. 
 
-![alt text](image.png)
+![](daturasmall.png)
 
-In other words, Datura Network will provide anonymity on the TCP/IP layer at all costs, while maintaining usability of the network, we're going to implement every feature the other anonymity networks should've implemented by now.
+Datura Network will provide bi-directional anonymity on the TCP/IP layer **at all costs** (keeping both clients and servers anonymous), as long as it remains usable. We're going to implement every feature the other anonymity networks should've already implemented by now to protect against today's state-level threats landscape.
+
+Please [read the specification document](spec/specification.md) to know where we're at on the brainstorming of the project, it'll get you up to speed.
+
+## How can I contribute ?
+
+The contribution process heavily follows how we handle [contributions for the opsec bible](http://opbible7nans45sg33cbyeiwqmlp5fu7lklu6jd6f3mivrjeqadco5yd.onion/opsec/contribute/). Payments are as they are advertised on our [xmrbazaar listing](https://xmrbazaar.com/listing/cwGf/):
+
+The rewards are based on the (justified) complexity tags on the project board http://gdatura24gtdy23lxd7ht3xzx6mi7mdlkabpvuefhrjn4t5jduviw5ad.onion/nihilist/Datura-Network/projects/19 (i pledge to not change those prices for the entirety of Q4 2025)
+- Simple (0.0175 to 0.0701xmr)
+- Doable (0.0701 to 0.1052xmr)
+- Complex (0.1052 to 0.1754xmr)
+
+First of all you can create a git account on the git datura instance ran by us by [signing up here](http://gdatura24gtdy23lxd7ht3xzx6mi7mdlkabpvuefhrjn4t5jduviw5ad.onion/user/sign_up), (you don't need to mention a real email, there's no email verification anyway).
+
+So you have 3 ways you can contribute to the project:
+
+1) help us brainstorm the project: pick any issue on the [brainstorming project board](http://gdatura24gtdy23lxd7ht3xzx6mi7mdlkabpvuefhrjn4t5jduviw5ad.onion/nihilist/Datura-Network/projects/16) and challenge it in case if we missed something
+2) help us write the proof of concepts: simply ask to be assigned on any issue on the [PoC project board](http://gdatura24gtdy23lxd7ht3xzx6mi7mdlkabpvuefhrjn4t5jduviw5ad.onion/nihilist/Datura-Network/projects/19) and we'll assign it to you with a deadline of 2 weeks if that's your first contribution, or 4 weeks if you have delivered before. **(and of course we'll pay you in monero if you complete a todolist for us)**
+3) and lastly if you want to donate to us to fund this project you can donate to us at this XMR address: **84Zqdr7o2RfTKRhjc6SR3TdhK1yLxRLMPARU3PMvmyH8XmCgMoBHa7X8YoM7WphfbkJsjQ4SeEQCr4Nn2uzJSfCD9KiBu9E** (we're anyway going to reuse those funds to pay the developers on this project). When the project will be fully planned out, we'll also create a crowd fundraiser to ensure the developers are all properly paid for their work.
+
+## What's the overall progress on the project ?
+
+For now we are still in the brainstorming and planning phase.
+
+We are currently focusing on writing the proof of concepts to help us see more clearly what is possible and not possible.
+
+Once all of the proof of concepts are written we'll be able to effectively write ALL of the todolists for all the features we want to have in the network, and fully plan out the project.
+
+And Once the project is fully planned out, we'll be able to estimate the cost of building the network, and make a 
 
 # Roadmap (DRAFT):
 
@@ -51,5 +80,6 @@ Phase 5: Network Release
     - v1.0.0: ramping up the SEO as much as possible
 ```
 
+## License - CC0
 
-![](nowhere-net.drawio.png)
+This project is under the CC0 License - Public Domain

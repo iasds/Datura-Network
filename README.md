@@ -35,6 +35,10 @@ Once all of the proof of concepts are written we'll be able to effectively write
 
 And Once the project is fully planned out, we'll be able to estimate the cost of building the network, and make a 
 
+## Our SimpleX chatroom
+
+If you have any questions on the project, don't hesitate to ask [in our simplex chatroom](https://dghh7wjyjrectfblqnyuy4mbshrybvlvnc5d5if5uyaceogtiiq5fnyd.onion/g#Th9RZoJW4_wESf2IrfnSWBmAsJi6NfJqmo2WF1OqgeE?p=443&c=9u8jZd9XK7B_jSBYgA3Dz1r1AMxAPgdgnwdHMO_v2FA).
+
 # Roadmap (DRAFT):
 
 ```

@@ -37,7 +37,7 @@ Solving process
 ```
 loop
     salt = random()
-    effort = (u32)(challenge[0..3])
+    effort = (u32)(challenge[0..=3])
     equix_hash = equix(challenge || salt)
 
     if blake2b_u32(challenge || salt || equix_hash ) * effort < U32_MAX
@@ -49,7 +49,7 @@ loop
 
 Verification process
 ```
-if (u32)(challenge[0..3]) != effort
+if (u32)(challenge[0..=3]) != effort
     return false
 
 if blake2b_u32(challenge || salt || equix_hash) * effort >= U32_MAX

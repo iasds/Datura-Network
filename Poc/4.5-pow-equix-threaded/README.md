@@ -68,3 +68,90 @@ With a little added complexity we could save < 0.05ms per thread by not spawning
 * [tor PoW](https://github.com/torproject/torspec/blob/main/proposals/327-pow-over-intro.txt)
 * [drillx PoW](https://github.com/regolith-labs/drillx)
 
+# Output
+## 1 thread test:
+```
+How many threads should i use? (Press Enter for default of 2): 1
+
+Running with 1 thread(s)
+
+Solving 32 challenges of effort 0 ................................
+Solution time avg: 7.92ms
+Verification time avg: 82.07µs
+
+Solving 32 challenges of effort 64 ................................
+Solution time avg: 353.80ms
+Verification time avg: 75.57µs
+
+Solving 32 challenges of effort 128 ................................
+Solution time avg: 1.03s
+Verification time avg: 75.05µs
+
+Solving 32 challenges of effort 192 ................................
+Solution time avg: 1.33s
+Verification time avg: 76.69µs
+
+Solving 32 challenges of effort 256 ................................
+Solution time avg: 2.21s
+Verification time avg: 85.39µs
+
+Solving 32 challenges of effort 320 ................................
+Solution time avg: 2.32s
+Verification time avg: 82.26µs
+
+Solving 32 challenges of effort 384 ................................
+Solution time avg: 2.87s
+Verification time avg: 83.37µs
+
+Solving 32 challenges of effort 448 ................................
+Solution time avg: 4.54s
+Verification time avg: 86.56µs
+
+Created challenge of effort 10000
+Created random solution [DC, 64, 22, 42, 58, 9B, 44, B7, 60, 9A, FC, 04, EE, 81, 33, 80, B5, 88, A8, 83, 55, 4A, 35, 02]
+Solution correctly verified as false (false)
+```
+
+## 2 threads test:
+```
+[user ~/Documents/Datura-Network.worm/Poc/4.5-pow-equix-threaded]% cargo run --release
+How many threads should i use? (Press Enter for default of 2): 2
+
+Running with 2 thread(s)
+
+Solving 32 challenges of effort 0 ................................
+Solution time avg: 11.90ms
+Verification time avg: 81.19µs
+
+Solving 32 challenges of effort 64 ................................
+Solution time avg: 276.24ms
+Verification time avg: 68.23µs
+
+Solving 32 challenges of effort 128 ................................
+Solution time avg: 462.52ms
+Verification time avg: 71.47µs
+
+Solving 32 challenges of effort 192 ................................
+Solution time avg: 770.23ms
+Verification time avg: 70.58µs
+
+Solving 32 challenges of effort 256 ................................
+Solution time avg: 941.10ms
+Verification time avg: 71.38µs
+
+Solving 32 challenges of effort 320 ................................
+Solution time avg: 1.15s
+Verification time avg: 70.39µs
+
+Solving 32 challenges of effort 384 ................................
+Solution time avg: 2.41s
+Verification time avg: 74.24µs
+
+Solving 32 challenges of effort 448 ................................
+Solution time avg: 1.90s
+Verification time avg: 71.61µs
+
+Created challenge of effort 10000
+Created random solution [6B, 1B, 32, 27, 69, A3, 87, 0B, 1C, 7F, 7C, E4, CD, 2F, A2, 8E, 21, 0D, F3, 86, 6B, 5F, 75, 0F]
+Solution correctly verified as false (false)
+```

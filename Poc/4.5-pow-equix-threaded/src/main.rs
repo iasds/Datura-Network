@@ -21,11 +21,11 @@ fn solve_challenge(num_threads: usize, challenge: u128) -> [u8; 24] {
 	let search_pos: u64 = getrandom::u64().unwrap();
 	let search_inc = u64::MAX / num_threads as u64;
 	
-	let mut handles: Vec<thread::JoinHandle<[u8; 24]>> = Vec::with_capacity(num_threads);
+	let mut handles: Vec<thread::JoinHandle<Option<[u8; 24]>>> = Vec::with_capacity(num_threads);
 	let done = Arc::new(AtomicBool::new(false));
 
 	for t in 0..num_threads {
-		let mut salt = search_pos + search_inc*(t as u64);
+		let mut salt: u64 = search_pos + search_inc*(t as u64);
 
 		let done_local = done.clone();
 		handles.push(thread::spawn(move || {
@@ -54,27 +54,26 @@ fn solve_challenge(num_threads: usize, challenge: u128) -> [u8; 24] {
 				let hash_u32 = u32::from_le_bytes(hasher.hash(&seed).as_bytes().try_into().unwrap());
 
 				if (hash_u32 as u64) * (effort as u64) < u32::MAX.into() {
-					return seed[16..40].try_into().unwrap();
+					done_local.store(true, Ordering::Release);
+					return Some(seed[16..40].try_into().unwrap());
 				}
 
-				if done_local.load(Ordering::Relaxed) { 
-					return [0u8; 24];
+				if done_local.load(Ordering::Acquire) { 
+					return None;
 				}
 			}
 		}));
 	}
 
-	loop {
-		for t in 0..num_threads {
-			if handles[t].is_finished() { 
-				done.store(true, Ordering::Relaxed);
-				
-				return handles.swap_remove(t).join().unwrap();
-			}
+	for h in handles {
+		let r = h.join().unwrap();
+		if r.is_some() {
+			return r.unwrap();
 		}
-		
-		thread::sleep(Duration::from_millis(1));
 	}
+
+	assert!(false);
+	return [0u8; 24];
 }
 
 fn verify_solution(effort: u32, challenge: u128, solution: [u8; 24]) -> bool {

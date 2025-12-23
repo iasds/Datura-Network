@@ -1,6 +1,6 @@
-# Datura Network Specification v0.2 (DRAFT)
+# Datura Network Specification v0.3 (DRAFT)
 
-## Threat Model
+## The Threat Model
 
 The threat landscape that is in scope spans the following 3 categories: 
 
@@ -342,7 +342,70 @@ End result: even if client Node A is a malicious adversary with the capabilities
 
 ![alt text](image-35.png)
 
-### TODO: Exit Nodes to access the clearnet 
+#### Bonus: non-default Decoy sources and destinations (reduced anonymity sets for lower bandwidth consumption and lower latency)
 
-### TODO: Exit Nodes to access other Darknets (like Tor and i2p)
+If the clients or hidden service administrators choose, they can configure their nodes to consume less bandwidth and send their packets around the network with lower latency, at the cost of having a lower anonymity set:
 
+1/6 anonymity set:
+
+![alt text](image-36.png)
+
+1/4 anonymity set:
+
+![alt text](image-37.png)
+
+1/2 anonymity set:
+
+![alt text](image-38.png)
+
+1/1 anonymity set:
+
+![alt text](image-39.png)
+
+Take note that this is also the smallest hashring that there can be on the datura network, there needs to be at least 4 nodes for the network to be able to function.
+
+### Datura Exit Nodes to access other Darknets (like Tor and i2p)
+
+Datura Network will also enable users to talk to other darknets like Tor or i2p, thanks to exit nodes. There will be Datura nodes which will be marked as either Tor or i2p exit nodes:
+
+![alt text](image-41.png)
+
+Therefore if client A wants to access an onion or i2p website via Datura network, it will be possible. the network will simply route their request through a Datura tor or i2p exit node, which will interface with the other networks accordingly, which will also enable to access those websites anonymously.
+
+### Secret Datura Exit Nodes to access the clearnet 
+
+By default, the Datura Network users will be able to access the clearnet via the network's Datura Tor exit nodes, to be able to access the clearnet, through the Tor exit nodes. **The obvious drawback to this is that Tor exit nodes are publicly listed by torproject, this makes it so that the websites that are being accessed via Tor are aware that they are being accessed anonymously**, that's obviously not ideal because the anonymous user can easily be blocked because of it.
+
+![alt text](image-40.png)
+
+To solve this problem, Datura network will have secret clearnet exit nodes. Those are going to be Datura Nodes which will secretely route users' traffic directly to the clearnet. **The catch here is that the users will need to pay a premium in Monero to be able to get ONE exit node revealed to them.** Not even the Datura Network itself will be able to determine if a given node is a clearnet exit node or not, the only way to know if a given datura node is an exit node, is to have already been told that it is an exit node.
+
+Datura Exit node runners will be provided the following:
+
+- a complete tutorial on how to run clearnet exit nodes
+- a basic php / html website template to enable them to :
+    - list the tor exit nodes that are being ran by the administrator (this list is hidden by default)
+    - interface with a local monero node RPC
+    - configure the cost of having an exit node revealed to the users
+    - configure the amount of seats that a given exit node has (to restrict the maximum amount of users that can pay to get an exit node revealed to them)
+    - publicly display if there are still seats available or not
+    - allow users to send their transaction ids (txids) to the website if there are still exit node seats available
+    - using those txids, the users will be able to get an exit node revealed to them (they only need to know one)
+    - users will be able to top up their account (which was automatically created using their initial transaction id) every month, to be able to keep their seat to the given exit node.
+
+![alt text](image-42.png)
+
+Given the current context of :
+
+1) Statist paranoia regarding the freedom that anonymous online browsing provides
+2) the very high public demand to be able to interact with the internet anonymously
+
+the Datura exit nodes way of functionning will provide a clear incentive for exit nodes runners to contribute to the network in a financially-sustainable manner, because not only will they receive payments from legit users that are trying to access the clearnet anonymously, **they will also receive payments from the malicious adversary because they will be desperately trying to list those clearnet exit nodes.**
+
+The Adversary is essentially going to be forced to anonymously pay the exit node runners in monero to get ONE random clearnet exit node revealed to them at a time. The adversary is forced to continuously pay datura exit node runners non-stop, to try and know as many clearnet exit nodes as possible, **but even then the full extent of exit nodes that exist will always remain uncertain to them**, because:
+- there will always be exit nodes that have been fully rented by legit users before them, so if a given exit node with 100 seats is continously solely rented by legit users, then that exit node won't ever be doxxed and will remain unknown to the adversary.
+- even if there are seats available still, the adversary has no way to know if the remaining available seats are for one clearnet exit node, or for 100 exit nodes. 
+
+There will always be uncertainty in regards to the amount of exit nodes that have been rented out by legit users in the past, and the current amount of exit nodes that are yet to be rented out.
+
+Once an exit node is revealed to a user, all they need to do is use the given node's hash in their own node's configuration, to constantly route clearnet traffic to that node in particular.

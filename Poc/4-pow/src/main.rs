@@ -73,7 +73,7 @@ fn main() {
         let now = std::time::Instant::now();
         println!("solving challenge {:02X?}", challenge);
 
-        let solution = solve_challenge(&vm, challenge);
+        let solution = solve_challenge(test_vm, challenge);
         println!("took {:.2?} to find solution ({:X?})", now.elapsed(), solution);
         
         let now = std::time::Instant::now();
@@ -87,7 +87,7 @@ fn main() {
     let solution = getrandom::u64().unwrap();
     println!("created random solution {}", solution);
     
-    let result = validate_solution(&vm, challenge, solution);
+    let result = validate_solution(test_vm, challenge, solution);
 
     assert!(result == false);
     println!("solution correctly validated as {} (false)", result);

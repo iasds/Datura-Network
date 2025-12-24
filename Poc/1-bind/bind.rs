@@ -7,6 +7,7 @@ fn main() {
 
 	if args.len() > 1 { port = args[1].parse().unwrap(); }
 
+	// spawn UDP listener
 	std::thread::spawn(move || {
     	let udp_socket = std::net::UdpSocket::bind(format!("127.0.0.1:{}", port)).unwrap();
 
@@ -22,6 +23,7 @@ fn main() {
 
 	println!("Succeeded in binding UDP and TCP on port {}", port);
 
+	// loop to spawn TCP listener for each connection
     for stream in tcp_listener.incoming() {
 		let mut stream = stream.unwrap();
 

@@ -41,6 +41,8 @@ fn solve_challenge(num_threads: usize, challenge: u128) -> [u8; 24] {
 				salt += 1;
 
 				let mut seed = [0u8; 40];
+
+				// pack challenge and salt to attempt Equi-X solution for
 				seed[..16].copy_from_slice(&challenge.to_le_bytes());
 				seed[16..24].copy_from_slice(&salt.to_le_bytes());
 

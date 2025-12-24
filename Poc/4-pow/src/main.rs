@@ -41,11 +41,11 @@ fn solve_challenge(vm: &RandomXVM, challenge: [u8; 16]) -> u64 {
 }
 
 fn main() {
-    let cache = RandomXCache::new(RandomXFlag::FLAG_JIT | RandomXFlag::FLAG_ARGON2_AVX2, &[0]).unwrap();
+    let cache = RandomXCache::new(RandomXFlag::FLAG_DEFAULT, &[0]).unwrap();
 
     println!("initializing dataset (only needs to be done once, at node startup)...");
     let now = std::time::Instant::now();
-    let dataset = RandomXDataset::new(RandomXFlag::FLAG_DEFAULT, cache, 0).unwrap();
+ //   let dataset = RandomXDataset::new(RandomXFlag::FLAG_DEFAULT, cache, 0).unwrap();
     println!("initialized, took {:.2?}\n", now.elapsed());
 
     //let vm = RandomXVM::new(RandomXFlag::FLAG_HARD_AES | RandomXFlag::FLAG_FULL_MEM | RandomXFlag::FLAG_JIT, None, Some(dataset)).unwrap();
@@ -72,7 +72,6 @@ fn main() {
         let now = std::time::Instant::now();
         assert!(validate_solution(test_vm, challenge, solution));
         println!("took {:.2?} to validate solution\n", now.elapsed());
-        break;
     }
 
     let challenge = create_challenge(40);

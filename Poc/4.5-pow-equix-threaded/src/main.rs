@@ -10,6 +10,7 @@ use std::sync::Arc;
 const BENCHMARK_SAMPLES: u32 = 32;
 
 fn create_challenge(effort: u32) -> u128 {
+	// pack random number and effort into challenge
 	(getrandom::u64().unwrap() as u128) << 64 |
 	(getrandom::u32().unwrap() as u128) << 32 |
 	effort as u128
@@ -25,6 +26,7 @@ fn solve_challenge(num_threads: usize, challenge: u128) -> [u8; 24] {
 	let done = Arc::new(AtomicBool::new(false));
 
 	for t in 0..num_threads {
+		// each thread needs to search as far away from each other
 		let mut salt: u64 = search_pos + search_inc*(t as u64);
 
 		let done_local = done.clone();
@@ -34,6 +36,7 @@ fn solve_challenge(num_threads: usize, challenge: u128) -> [u8; 24] {
 
 			let mut mem = SolverMemory::new();
 
+			// repeat Equi-X solutions until one matches requirements
 			loop {
 				salt += 1;
 
@@ -53,6 +56,7 @@ fn solve_challenge(num_threads: usize, challenge: u128) -> [u8; 24] {
 
 				let hash_u32 = u32::from_le_bytes(hasher.hash(&seed).as_bytes().try_into().unwrap());
 
+				// if requirements are met, signal other threads to stop, then return
 				if (hash_u32 as u64) * (effort as u64) < u32::MAX.into() {
 					done_local.store(true, Ordering::Release);
 					return Some(seed[16..40].try_into().unwrap());
@@ -65,6 +69,7 @@ fn solve_challenge(num_threads: usize, challenge: u128) -> [u8; 24] {
 		}));
 	}
 
+	// join each handle until one returns a valid value, then return that value
 	for h in handles {
 		let r = h.join().unwrap();
 		if r.is_some() {
@@ -77,10 +82,12 @@ fn solve_challenge(num_threads: usize, challenge: u128) -> [u8; 24] {
 }
 
 fn verify_solution(effort: u32, challenge: u128, solution: [u8; 24]) -> bool {
+	// extract effort parameter from challenge
 	if ((challenge&0xffffffff) as u32) != effort { return false; };
 
 	let mut seed = [0u8; 40];
 
+	// pack challenge and solution for hashing
 	seed[..16].copy_from_slice(&challenge.to_le_bytes());
 	seed[16..].copy_from_slice(&solution);
 
@@ -89,8 +96,10 @@ fn verify_solution(effort: u32, challenge: u128, solution: [u8; 24]) -> bool {
 		.as_bytes().try_into().unwrap()
 	);
 
+	// fail if requirements are not met
 	if (hash_u32 as u64) * (effort as u64) >= u32::MAX.into() { return false; }
 
+	// fail or succeed depending on if Equi-X solution is verified
 	return verify_bytes(&seed[..24], &seed[24..].try_into().unwrap()).is_ok();
 }
 
@@ -99,6 +108,7 @@ fn main() {
 	print!("How many threads should i use? (Press Enter for default of {}): ", num_threads);	
 	let _ = stdout().flush().unwrap();
 
+	// get thread selection string
 	let mut selection_string = String::new();
 	stdin().read_line(&mut selection_string).unwrap();
 	let picked_num_threads: usize = match selection_string.trim().parse() {
@@ -106,9 +116,11 @@ fn main() {
 		Err(_) => num_threads.into(),
 	};
 
+	// parse validity of thread selection
 	if picked_num_threads < 1 || picked_num_threads > num_threads { println!("Thread amount {} is out of bounds", picked_num_threads); exit(1); }
 	println!("\nRunning with {} thread(s)\n", picked_num_threads);
 
+	// benchmark at various effort values
 	for i in 0..8 {
 		let d = i * 64;
 
@@ -135,6 +147,7 @@ fn main() {
 	}
 
 
+	// test that a random solution fails verification
 	{
 		let test_effort = 10000;
 

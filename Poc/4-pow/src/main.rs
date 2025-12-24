@@ -1,4 +1,5 @@
 use randomx_rs::*;
+use std::env;
 
 /*
 Challenge Format: 128-bit
@@ -48,6 +49,22 @@ fn main() {
     println!("initialized, took {:.2?}\n", now.elapsed());
 
     let vm = RandomXVM::new(RandomXFlag::FLAG_HARD_AES | RandomXFlag::FLAG_FULL_MEM | RandomXFlag::FLAG_JIT, None, Some(dataset)).unwrap();
+
+    let key = b"test key 000";
+    let flags = RandomXFlag::get_recommended_flags();
+    let cache = RandomXCache::new(flags, key).unwrap();
+    let light_vm = RandomXVM::new(flags, Some(cache), None).unwrap();
+
+    let args = env::args();
+    let mut test_vm = &vm;
+    if args.len() < 2 {
+        println!("by default, running randomX in fast mode");
+    }
+    else {
+        println!("running in light mode");
+        test_vm = &light_vm;
+    }
+        
      
     for d in 0..15 {
         let challenge = create_challenge(d);
@@ -55,11 +72,12 @@ fn main() {
 
         let now = std::time::Instant::now();
         println!("solving challenge {:02X?}", challenge);
+
         let solution = solve_challenge(&vm, challenge);
         println!("took {:.2?} to find solution ({:X?})", now.elapsed(), solution);
         
         let now = std::time::Instant::now();
-        assert!(validate_solution(&vm, challenge, solution));
+        assert!(validate_solution(test_vm, challenge, solution));
         println!("took {:.2?} to validate solution\n", now.elapsed());
     }
 

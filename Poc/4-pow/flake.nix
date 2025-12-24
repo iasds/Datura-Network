@@ -32,9 +32,9 @@
               pname = "pow";
               version = "0.1.0";
 
-              src = ./Poc/4-pow;
+              src = ./.;
 
-              cargoLock.lockFile = ./Poc/4-pow/Cargo.lock;
+              cargoLock.lockFile = ./Cargo.lock;
             };
 
         devShells = {

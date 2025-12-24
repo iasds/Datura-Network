@@ -48,7 +48,7 @@ fn main() {
     let dataset = RandomXDataset::new(RandomXFlag::FLAG_DEFAULT, cache, 0).unwrap();
     println!("initialized, took {:.2?}\n", now.elapsed());
 
-    let vm = RandomXVM::new(RandomXFlag::FLAG_HARD_AES | RandomXFlag::FLAG_FULL_MEM | RandomXFlag::FLAG_JIT, None, Some(dataset)).unwrap();
+    //let vm = RandomXVM::new(RandomXFlag::FLAG_HARD_AES | RandomXFlag::FLAG_FULL_MEM | RandomXFlag::FLAG_JIT, None, Some(dataset)).unwrap();
 
     let key = b"test key 000";
     let flags = RandomXFlag::get_recommended_flags();
@@ -56,14 +56,7 @@ fn main() {
     let light_vm = RandomXVM::new(flags, Some(cache), None).unwrap();
 
     let args = env::args();
-    let mut test_vm = &vm;
-    if args.len() < 2 {
-        println!("by default, running randomX in fast mode");
-    }
-    else {
-        println!("running in light mode");
-        test_vm = &light_vm;
-    }
+    let mut test_vm = &light_vm;
         
      
     for d in 0..15 {
@@ -79,6 +72,7 @@ fn main() {
         let now = std::time::Instant::now();
         assert!(validate_solution(test_vm, challenge, solution));
         println!("took {:.2?} to validate solution\n", now.elapsed());
+        break;
     }
 
     let challenge = create_challenge(40);

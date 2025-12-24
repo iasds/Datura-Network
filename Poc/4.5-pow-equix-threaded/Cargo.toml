@@ -1,0 +1,9 @@
+[package]
+name = "pow-equix-threaded"
+version = "0.0.0"
+edition = "2024"
+
+[dependencies]
+equix = "0.5.1"
+getrandom = "0.3.4"
+blake2b_simd = "1.0.3"

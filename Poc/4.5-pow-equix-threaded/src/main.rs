@@ -26,7 +26,7 @@ fn solve_challenge(num_threads: usize, challenge: u128) -> [u8; 24] {
 	let done = Arc::new(AtomicBool::new(false));
 
 	for t in 0..num_threads {
-		// each thread needs to search as far away from each other
+		// each thread needs to search as far away from each other as they can
 		let mut salt: u64 = search_pos + search_inc*(t as u64);
 
 		let done_local = done.clone();

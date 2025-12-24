@@ -20,6 +20,12 @@ verify_solution(effort: u32, challenge: u128, solution: [u8; 24]) -> result: boo
 ## Effort (difficulty)
 Effort parameter determines difficulty on a linear scale from 0 to 4294967295, the probability of success each try should be about 1/effort (0 effort is 100%)
 
+Effort difficulty is imposed by setting a requirement on the max value of the output of the hash interpreted as a u32
+```
+hash_u32 * effort < U32_MAX
+```
+If effort is 0, this will always succeed, if effort is 2, then hash_u32 must be less than half of U32_MAX, so half of the values will fail, if effort is 3, then two thirds will fail. In this way the probability of success is influenced by the effort parameter
+
 ## Implementation
 Challenge format (16 bytes)
 ```

@@ -23,6 +23,20 @@
         pkgs = nixpkgs.legacyPackages.${system};
       in
       {
+        packages.default =
+
+          pkgs.rustPlatform.buildRustPackage
+            {
+              nativeBuildInputs = with pkgs; [cmake ];
+              buildInputs = with pkgs; [   stdenv.cc.cc.lib ];
+              pname = "pow";
+              version = "0.1.0";
+
+              src = ./Poc/4-pow;
+
+              cargoLock.lockFile = ./Poc/4-pow/Cargo.lock;
+            };
+
         devShells = {
           default = pkgs.mkShell {
             buildInputs = [

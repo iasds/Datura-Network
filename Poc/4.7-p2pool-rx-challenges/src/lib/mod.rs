@@ -17,6 +17,25 @@ pub struct Client {
     rq_id: i64,
 }
 
+#[derive(Default, Serialize, Deserialize)]
+struct LoginParams {
+    login: String,
+    pass: String,
+    agent: String,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(untagged)]
+enum StratumQueries {
+    Login {
+        id: i64,
+        jsonrpc: String,
+        method: String,
+        params: LoginParams,
+    }
+}
+
+
 impl Client {
     pub async fn new(addr: Option<String>) -> Result<Self, ()> {
         let mut client = Client {
@@ -30,8 +49,9 @@ impl Client {
                     .await
                     .expect("Connection failed"),
             );
-            let login_str = format!("{}\n",r#"{ "id":1, "jsonrpc":"2.0", "method":"login", "params":{"login":"", "pass":"", "agent":""}}"#);
-            reader.get_mut().write_all(login_str.as_bytes()).await.unwrap();
+            let login_str = serde_json::to_string(&StratumQueries::Login{id: 1, jsonrpc: "2.0".to_string(), method: "login".to_string(), params: LoginParams::default() }).unwrap();
+            println!("{}",login_str);
+            reader.get_mut().write_all(format!("{}\n",login_str).as_bytes()).await.unwrap();
 
             let mut line = String::new();
             let res = reader.read_line(&mut line).await.unwrap();

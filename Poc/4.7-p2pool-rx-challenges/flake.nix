@@ -19,7 +19,7 @@
       system:
 
       let
-        toolchain = fenix.packages.${system}.minimal.toolchain;
+        toolchain = fenix.packages.${system}.complete.toolchain;
         pkgs = nixpkgs.legacyPackages.${system};
       in
       {

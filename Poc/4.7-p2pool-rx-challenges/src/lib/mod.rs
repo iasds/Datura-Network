@@ -35,6 +35,35 @@ enum StratumQueries {
     }
 }
 
+#[derive(Deserialize)]
+struct Job {
+    id: String,
+    job: JobData,
+    extensions: Vec<String>,
+    status: String,
+}
+
+#[derive(Deserialize)]
+struct JobData {
+    blob: String,
+    job_id: String,
+    target: String,
+    algo: String,
+    height: i64,
+    seed_hash: String,
+}
+
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum ServerReply {
+    LoginReply{
+        jsonrpc: String,
+        id:i64,
+        error: Option<String>,
+        result: Job,
+    }
+}
+
 
 impl Client {
     pub async fn new(addr: Option<String>) -> Result<Self, ()> {
@@ -56,6 +85,7 @@ impl Client {
             let mut line = String::new();
             let res = reader.read_line(&mut line).await.unwrap();
             println!("subscribe response: {}, {} long", line, res);
+            let reply : ServerReply = serde_json::from_str(&line).unwrap();
             client.stream = Some(reader);
         }
        

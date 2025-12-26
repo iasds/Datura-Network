@@ -150,7 +150,7 @@ A 3-hop bandwidth unlocking procedure requires the source node to first complete
 
 ![alt text](image-45.png)
 
-### Nodes can make other nodes pay in solve PoW challenges coming from Monero's P2pool 
+### Nodes can make other nodes pay for services by making them solve PoW challenges coming from Monero's P2pool 
 
 To ensure that an adversary is disincentivized from attempting to DDoS the network, Datura nodes can retrieve PoW Challenges coming from Monero's P2Pool and make other nodes pay by solving those challenges.
 

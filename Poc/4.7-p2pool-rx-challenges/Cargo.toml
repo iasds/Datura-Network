@@ -1,6 +1,11 @@
 [package]
-name = "p2pool-rx-challenges"
+name = "xmr-pow-challenges"
 version = "0.1.0"
 edition = "2024"
 
+[lib]
+name="xmr_pow_challenges"
+path = "src/lib/mod.rs"
+
 [dependencies]
+stratum-v1 = "0.1.0"

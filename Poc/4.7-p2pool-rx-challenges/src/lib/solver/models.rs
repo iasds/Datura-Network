@@ -6,7 +6,7 @@ use super::errors::SolverError;
 ///or created from a p2pool job
 #[derive(Debug)]
 pub struct DaturaPow {
-    blob: [u8;128],
+    blob: Vec<u8>,
     seed_hash: [u8;32],
     job_id: String,
     target: u64,
@@ -19,7 +19,7 @@ impl Iterator for DaturaPow {
     ///so we are using the first 16 bit of our 32 bit nonce per client and send a random lower 16
     ///bits for the client to iterate over
     fn next(&mut self) -> Option<Self::Item> {
-        let mut newblob = self.blob;
+        let mut newblob = self.blob.clone();
 
            // Example: upper 16 bits already set for client
         let upper = ((newblob[124] as u16) | ((newblob[125] as u16) << 8)) as u16;
@@ -42,19 +42,22 @@ impl Iterator for DaturaPow {
 
 impl TryFrom<JobData> for DaturaPow {
     type Error = SolverError;
-    fn try_from(workOrder: JobData) -> Result<DaturaPow,SolverError> {
+    fn try_from(work_order: JobData) -> Result<DaturaPow,SolverError> {
+        println!("{:?}",work_order);
+        let tblob =hex::decode(work_order.blob.clone()).unwrap();
+        println!("iblob len {}",tblob.len());
         Ok(DaturaPow {
-            job_id: workOrder.job_id,
-            blob: hex::decode(workOrder.blob)?.as_slice().try_into()?,
-            seed_hash: hex::decode(workOrder.seed_hash)?.as_slice().try_into()?,
-            target: u64::from_str_radix(&workOrder.target,16)?,
+            job_id: work_order.job_id,
+            blob: hex::decode(work_order.blob)?,
+            seed_hash: hex::decode(work_order.seed_hash)?.as_slice().try_into()?,
+            target: u64::from_str_radix(&work_order.target,16)?,
         })
     }
 }
 
 impl DaturaPow {
     ///Create new Datura pow from p2pool job data
-    pub fn new(blob: [u8;128], seed_hash: [u8; 32], job_id: String, target: u64) -> Self {
+    pub fn new(blob: Vec<u8>, seed_hash: [u8; 32], job_id: String, target: u64) -> Self {
         DaturaPow {
             blob,
             seed_hash,
@@ -73,7 +76,7 @@ impl DaturaPow {
         fill(&mut seed_hash);
         DaturaPow {
             job_id: "0".to_string(),
-            blob,
+            blob: blob.to_vec(),
             seed_hash,
             target: target.unwrap_or(1),
         }

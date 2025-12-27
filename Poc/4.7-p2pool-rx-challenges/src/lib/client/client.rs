@@ -1,7 +1,8 @@
 use super::stratum_models::*;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::TcpStream;
-use crate::solver::DaturaPow;
+use crate::DaturaPow;
+use super::errors::ClientError;
 
 pub struct Client {
     addr: Option<String>,
@@ -10,7 +11,7 @@ pub struct Client {
 }
 
 impl Client {
-    pub async fn get_challenge(&mut self) -> DaturaPow {
+    pub async fn get_challenge(&mut self) -> Result<DaturaPow,ClientError> {
         let mut line = String::new();
         if let Some(reader) = &mut self.stream {
             match tokio::time::timeout(
@@ -20,31 +21,30 @@ impl Client {
             .await
             {
                 Ok(Ok(0)) => {
-                    println!("Server closed connection");
                     todo!("write reconnect logic");
+                    return ClientError::ServerDisconnected;
                     self.last_job.clone()
                 }
                 Ok(Ok(_)) => {
                     if let Ok(ServerReply::WorkOrder { params, .. }) =
                         serde_json::from_str::<ServerReply>(&line)
                     {
-                        self.last_job = Some(params.into());
-                        self.last_job.clone()
+                        self.last_job = Some(params.clone().into());
+                        Ok(params.into())
                     } else {
-                        panic!("bad reply type");
+                        ClientError::UnknownServerReply(line.clone())
                     }
                 }
                 Ok(Err(e)) => {
-                    panic!("Read error: {}", e);
+                    ClientError::ReadError(e)
                 }
                 Err(_) => {
-                    // timeout
                     println!("No new job received in 5 seconds");
                     self.last_job.clone()
                 }
             }
         } else {
-            DaturaPow::random()
+            Ok(DaturaPow::random())
         }
     }
     pub async fn new(addr: Option<String>) -> Result<Self, ()> {

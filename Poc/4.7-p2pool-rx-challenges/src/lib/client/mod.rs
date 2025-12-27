@@ -1,3 +1,3 @@
 mod client;
-mod solver;
+mod models;
 pub use client::Client;

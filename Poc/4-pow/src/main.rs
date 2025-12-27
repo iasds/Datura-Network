@@ -44,8 +44,14 @@ fn solve_challenge(vm: &RandomXVM, challenge: [u8; 16]) -> u64 {
 }
 
 fn main() {
-    let cache = RandomXCache::new(RandomXFlag::FLAG_DEFAULT, &[0]).unwrap();
-    let flags = RandomXFlag::get_recommended_flags();
+    /*
+     * got challenge JobData { blob: "1010ebc2beca060def36c3eb9b1f32cb8e26e8880cdee27124c52800e8e984087579aaba8b10d8000000d2ad79456f7b9a22de7b63085297d19502d8d406720b3761047071e82878fb9d0933", job_id: "7", target: "37860000", algo: "rx/0", height: 3574527, seed_hash: "491c63749eea49f1c01ce7dc29934437ea725b41fcd13c5456433156225f17c8" }
+*/
+    let test_blob = b"1010ebc2beca060def36c3eb9b1f32cb8e26e8880cdee27124c52800e8e984087579aaba8b10d8000000d2ad79456f7b9a22de7b63085297d19502d8d406720b3761047071e82878fb9d0933";
+    let seed_hash = b"491c63749eea49f1c01ce7dc29934437ea725b41fcd13c5456433156225f17c8";
+
+    let cache = RandomXCache::new(RandomXFlag::FLAG_DEFAULT, &seed_hash).unwrap();
+    let vm = RandomXVM::new(flags, Some(cache), None).unwrap()
 
     let now = std::time::Instant::now();
 

@@ -1,16 +1,16 @@
 use super::stratum_models::*;
-use serde::{Deserialize, Serialize};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::TcpStream;
+use crate::solver::DaturaPow;
 
 pub struct Client {
     addr: Option<String>,
     stream: Option<BufReader<TcpStream>>,
-    last_job: Option<JobData>,
+    last_job: Option<DaturaPow>,
 }
 
 impl Client {
-    pub async fn get_challenge(&mut self) -> Option<JobData> {
+    pub async fn get_challenge(&mut self) -> DaturaPow {
         let mut line = String::new();
         if let Some(reader) = &mut self.stream {
             match tokio::time::timeout(
@@ -21,13 +21,14 @@ impl Client {
             {
                 Ok(Ok(0)) => {
                     println!("Server closed connection");
+                    todo!("write reconnect logic");
                     self.last_job.clone()
                 }
                 Ok(Ok(_)) => {
                     if let Ok(ServerReply::WorkOrder { params, .. }) =
                         serde_json::from_str::<ServerReply>(&line)
                     {
-                        self.last_job = Some(params.clone());
+                        self.last_job = Some(params.into());
                         self.last_job.clone()
                     } else {
                         panic!("bad reply type");
@@ -43,8 +44,7 @@ impl Client {
                 }
             }
         } else {
-            todo!("return some dummy random job");
-            None
+            DaturaPow::random()
         }
     }
     pub async fn new(addr: Option<String>) -> Result<Self, ()> {
@@ -54,11 +54,11 @@ impl Client {
                     .await
                     .expect("Connection failed"),
             );
-            let login_str = serde_json::to_string(&StratumQueries::Login {
+            let login_str = serde_json::to_string(&StratumQuery {
                 id: 1,
                 jsonrpc: "2.0".to_string(),
                 method: "login".to_string(),
-                params: LoginParams::default(),
+                params: StratumParams::LoginParams::default(),
             })
             .unwrap();
             reader

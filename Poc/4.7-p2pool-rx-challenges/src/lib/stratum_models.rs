@@ -1,24 +1,29 @@
 use serde::{Deserialize, Serialize};
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-use tokio::net::TcpStream;
 
 #[derive(Default, Serialize, Deserialize)]
-pub struct LoginParams {
+#[serde(untagged)]
+pub enum StratumParams {
+    LoginParams {
     login: String,
     pass: String,
     agent: String,
+},
+    SubmitParams {
+        id: String,
+        job_id: String,
+        nonce: String,
+        result: String,
+    }
 }
 
-#[derive(Serialize, Deserialize)]
-#[serde(untagged)]
-pub enum StratumQueries {
-    Login {
+#[derive(serde::Serialize, Deserialize)]
+pub struct StratumQuery {
         id: i64,
         jsonrpc: String,
         method: String,
-        params: LoginParams,
-    },
-}
+        params: StratumParams,
+    }
+
 
 #[derive(Deserialize)]
 pub struct Job {

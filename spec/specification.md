@@ -1,4 +1,4 @@
-# Datura Network Specification v0.3 (DRAFT)
+# Datura Network Specification v0.4 (DRAFT)
 
 ## The Threat Model
 
@@ -100,6 +100,8 @@ As a node, you will only accept to route traffic for other nodes if they manage 
 - A -> E : "Ok here's the randomX solution!" (E now unlocks the bandwidth from A to E to be 1mbps instead of 10kbps)
 - A <- E : "Ok valid answer, i accept to route 1gb of traffic for you, at 1mbps!"
 
+
+
 ### Clients choose where their connections go, including which Nodes are used as Decoy Destinations
 
 For every connection that clients make, they are choosing multiple hops, in this example there are 3. And for each real destination hop along the way, there are also 2 other decoy destinations where the traffic is being sent to:
@@ -115,13 +117,50 @@ Every node along the way does not know what the traffic they recieve is for, unt
 
 Important sidenote, **these decoy destinations are remembered on the clientside for future use, because long-term passive traffic correllation attacks are in scope in the threat model.** If an adversary can monitor the traffic activity of all nodes on the network (from an external point of view), in case of decoy / hop nodes constantly changing, the only point in common over time of the connections would be Node A and Node I.
 
-### Nodes limit the bandwidth usage of other nodes to 10kbps by default, until they solve their PoW challenge.
+### Nodes limit the bandwidth usage of other nodes to 10kbps by default, until they solve their PoW challenge. (bandwidth unlocking procedures)
 
 ![alt text](image-6.png)
 
 By default, nodes cap incoming nodes traffic to 10kbps max, meaning just enough bandwidth to ask for randomX challenges and send their solutions. That way in case if a disruptive adversary tries to flood the network with traffic worth terabytes per second firepower, they can't do it due to the bandwidth constraints.
 
 The only way to widen the bandwidth is to solve the RandomX challenge of the given node you want to route the traffic through, you have to spend CPU power to be able to do that, and that only unlocks the bandwidth to a set amount, allowing a set amount of traffic to go through (like 1gb for example), and that's only valid for a set amount of time (24 hours for example).
+
+### Each Node on a circuit is responsible for checking the PoW solution sent by the source node is valid, to unlock bandwidth
+
+By default, nodes are communicating to each other at 10kbps max. This is to ensure that one adversary can't just consume all bandwidth at once sending junk traffic non-stop.
+
+To unlock the bandwidth to 1mbps, the source node has to solve the destination node's PoW challenge, following the 1-hop bandwidth unlocking procedure:
+
+![alt text](image-43.png)
+
+Blocking malicious traffic on 1-hop is easy because you know the source from where the malicious traffic came from, so you can easily block them on the IP layer (for example if the source node asks for the same PoW challenge too many times, or if the source node sends the wrong PoW solution too many times, both can be used as a justification to block the malicious node.)
+
+And to unlock the bandwidth to 1mbps on a multiple-hop setup, the source node needs to first complete the 1-hop bandwidth unlocking procedure before being able to go for the following 2-hop bandwidth unlocking procedure:
+
+![alt text](image-44.png)
+
+Here as you can see, the important part is that the intermediary nodes are responsible for:
+- relaying the next PoW's challenges back to the previous nodes
+- remembering the next PoW challenges
+- and especially checking the validity of the previous nodes' PoW solutions
+
+The fact that the nodes in between are responsible for checking the validity of PoW solutions that are being sent through them is crucial because it allows the destination Node to always be able to block malicious traffic. Either the traffic came from the malicious Source Node A, or the traffic came from a malicious node B which intentionally relayed Node A's malicious traffic, **this means that Node C blocking the node from which the malicious traffic came from is always legitimate**.
+
+A 3-hop bandwidth unlocking procedure requires the source node to first complete the 1-hop bandwidth unlocking procedure, and then the 2-hop bandwidth unlocking procedure:
+
+![alt text](image-45.png)
+
+### Nodes can make other nodes pay for services by making them solve PoW challenges coming from Monero's P2pool 
+
+To ensure that an adversary is disincentivized from attempting to DDoS the network, Datura nodes can retrieve PoW Challenges coming from Monero's P2Pool and make other nodes pay by solving those challenges.
+
+![alt text](image-46.png)
+
+This ensures the following 2 properties:
+- If a DDoS was being conducted by an adversary, that adversary would be forced to pay node runners by solving RandomX challenges for them
+- Node runners would receive financial compensation because those PoW challenges are in turn used to mine Monero
+
+In other words, what doesn't kill the network will essentially make it financially stronger
 
 ### Hidden Services (Vanity V3 addresses)
 

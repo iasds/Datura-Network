@@ -30,7 +30,7 @@
             rustc = toolchain;
           }).buildRustPackage
             {
-              pname = "p2pool-challenges";
+              pname = "xmr-p2pool-challenges";
               nativeBuildInputs = with pkgs; [cmake ];
               buildInputs = with pkgs; [   stdenv.cc.cc.lib ];
               version = "0.1.0";

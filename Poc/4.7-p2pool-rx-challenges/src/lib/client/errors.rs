@@ -10,3 +10,9 @@ pub enum ClientError {
     #[error("error reading stream from server")]
     ReadError(String)
 }
+
+impl From<io::Error> for ClientError {
+    fn from(err: io::Error) -> Self {
+        ClientError::ReadError(err.to_string())
+    }
+}

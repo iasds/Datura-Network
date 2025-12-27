@@ -27,7 +27,7 @@ pub struct StratumQuery {
 
 #[derive(Deserialize)]
 pub struct Job {
-    id: String,
+    pub id: String,
     pub job: JobData,
     extensions: Vec<String>,
     status: String,

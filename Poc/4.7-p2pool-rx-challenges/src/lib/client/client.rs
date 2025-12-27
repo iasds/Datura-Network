@@ -8,9 +8,11 @@ pub struct Client {
     addr: Option<String>,
     stream: Option<BufReader<TcpStream>>,
     last_job: Option<DaturaPow>,
+    last_id: i64,
 }
 
 impl Client {
+    //reimplement as stream with a running loop
     pub async fn get_challenge(&mut self) -> Result<DaturaPow,ClientError> {
         let mut line = String::new();
         if let Some(reader) = &mut self.stream {
@@ -36,7 +38,7 @@ impl Client {
                     }
                 }
                 Ok(Err(e)) => {
-                    ClientError::ReadError(e)
+                    ClientError::ReadError(e.to_string())
                 }
                 Err(_) => {
                     println!("No new job received in 5 seconds");
@@ -47,7 +49,7 @@ impl Client {
             Ok(DaturaPow::random())
         }
     }
-    pub async fn new(addr: Option<String>) -> Result<Self, ()> {
+    pub async fn new(addr: Option<String>) -> Result<Self, ClientError> {
         if let Some(ip_addr) = addr {
             let mut reader = BufReader::new(
                 TcpStream::connect(ip_addr.clone())
@@ -59,13 +61,11 @@ impl Client {
                 jsonrpc: "2.0".to_string(),
                 method: "login".to_string(),
                 params: StratumParams::LoginParams::default(),
-            })
-            .unwrap();
+            })?;
             reader
                 .get_mut()
                 .write_all(format!("{}\n", login_str).as_bytes())
-                .await
-                .unwrap();
+                .await?;
             let mut line = String::new();
             let res = reader.read_line(&mut line).await.unwrap();
             let last_job = if let ServerReply::LoginReply { result, .. } =
@@ -79,12 +79,14 @@ impl Client {
                 addr: Some(ip_addr.clone()),
                 stream: Some(reader),
                 last_job,
+                last_id = 2,
             });
         }
         Ok(Client {
             addr: None,
             stream: None,
             last_job: None,
+            last_id : 1,
         })
     }
 }

@@ -45,7 +45,7 @@ impl Client {
                 }
             }
         } else {
-            Ok(DaturaPow::random())
+            Ok(DaturaPow::random(None))
         }
     }
     pub async fn new(addr: Option<String>) -> Result<Self, ClientError> {
@@ -55,12 +55,11 @@ impl Client {
                     .await
                     .expect("Connection failed"),
             );
-            let login_str = serde_json::to_string(&StratumQuery {
-                id: 1,
-                jsonrpc: "2.0".to_string(),
-                method: "login".to_string(),
-                params: StratumParams::empty_login(),
-            })?;
+            let login_str = serde_json::to_string(&StratumQuery::new(
+                1,
+                "login".to_string(),
+                StratumParams::empty_login(),
+            ))?;
             reader
                 .get_mut()
                 .write_all(format!("{}\n", login_str).as_bytes())
@@ -78,7 +77,7 @@ impl Client {
                 job.clone().try_into()?
             }
             else {
-                DaturaPow::random()
+                DaturaPow::random(None)
             };
             return Ok(Client {
                 addr: Some(ip_addr.clone()),
@@ -92,7 +91,7 @@ impl Client {
             addr: None,
             stream: None,
             last_job: None,
-            last_datura_pow : DaturaPow::random(),
+            last_datura_pow : DaturaPow::random(None), //implement backpressure with higher diff
             last_id : 1,
         })
     }

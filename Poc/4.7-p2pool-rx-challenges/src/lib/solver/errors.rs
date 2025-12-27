@@ -1,4 +1,5 @@
 use thiserror::Error;
+use std::num::ParseIntError;
 use std::array::TryFromSliceError;
 use crate::client::ServerReply;
 
@@ -12,6 +13,12 @@ pub enum SolverError{
     HexToSliceError(String),
     #[error("error creating daturaPoW challenge")]
     DaturaPowCreationError(String),
+}
+
+impl From<ParseIntError> for SolverError {
+    fn from(err:ParseIntError) -> Self {
+        SolverError::DaturaPowCreationError(err.to_string())
+    }
 }
 
 impl From<hex::FromHexError> for SolverError {

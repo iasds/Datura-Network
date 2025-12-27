@@ -4,10 +4,12 @@ use super::errors::SolverError;
 
 ///Structure for datura network proof of work, can be autonomously generated
 ///or created from a p2pool job
+#[derive(Debug)]
 pub struct DaturaPow {
     blob: [u8;128],
     seed_hash: [u8;32],
     job_id: String,
+    target: u64,
 }
 
 impl Iterator for DaturaPow {
@@ -32,7 +34,8 @@ impl Iterator for DaturaPow {
         Some(DaturaPow {
             seed_hash: self.seed_hash.clone(),
             blob: newblob,
-            job_id: self.job_id.clone()
+            job_id: self.job_id.clone(),
+            target: self.target,
         })
     }
 }
@@ -44,23 +47,24 @@ impl TryFrom<JobData> for DaturaPow {
             job_id: workOrder.job_id,
             blob: hex::decode(workOrder.blob)?.as_slice().try_into()?,
             seed_hash: hex::decode(workOrder.seed_hash)?.as_slice().try_into()?,
-
+            target: u64::from_str_radix(&workOrder.target,16)?,
         })
     }
 }
 
 impl DaturaPow {
     ///Create new Datura pow from p2pool job data
-    pub fn new(blob: [u8;128], seed_hash: [u8; 32], job_id: String) -> Self {
+    pub fn new(blob: [u8;128], seed_hash: [u8; 32], job_id: String, target: u64) -> Self {
         DaturaPow {
             blob,
             seed_hash,
             job_id,
+            target,
         }
     }
     
         ///generate really random challenge
-    pub fn random() -> Self {
+    pub fn random(target: Option<u64>) -> Self {
         
         let mut blob = [0u8;128];
         let mut seed_hash = [0u8;32];
@@ -71,6 +75,7 @@ impl DaturaPow {
             job_id: "0".to_string(),
             blob,
             seed_hash,
+            target: target.unwrap_or(1),
         }
     }
 }

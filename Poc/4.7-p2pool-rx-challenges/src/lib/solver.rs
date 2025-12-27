@@ -12,6 +12,19 @@ pub enum SolverMode {
 }
 
 pub struct DaturaPoW {
+    blob: [u8;128],
+    seed_hash: [u8;32],
+    job_id: String,
+}
+
+impl DaturaPow {
+    pub fn new(blob: [u8;128], seed_hash [u8; 32]) -> Self {
+        DaturaPow {
+            blob,
+            seed_hash,
+        }
+    }
+}
 
 
 impl Solver {
@@ -28,5 +41,5 @@ impl Solver {
         self.mode = mode;
     }
 
-    pub fn solve_challenge(&mut self, JobData
+    pub fn solve_challenge(&mut self, challenge: DaturaPow)
 }

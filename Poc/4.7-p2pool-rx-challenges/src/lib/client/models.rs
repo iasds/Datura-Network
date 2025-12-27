@@ -1,18 +1,33 @@
+/// This file contains models for interacting with the p2pool server
 use serde::{Deserialize, Serialize};
 
-#[derive(Default, Serialize, Deserialize)]
+#[derive(Serialize, Deserialize)]
 #[serde(untagged)]
+///Type of params used when communicating with the server as queries are always the same
+///but for the param field
 pub enum StratumParams {
+    ///Login variant: all those strings can be empty
     LoginParams {
     login: String,
     pass: String,
     agent: String,
 },
+    ///job submission params for converting back daturapows to p2pool shares
     SubmitParams {
         id: String,
         job_id: String,
         nonce: String,
         result: String,
+    }
+}
+
+impl StratumParams {
+    pub fn empty_login() -> Self {
+        Self::LoginParams {
+            login: String::new(),
+            pass: String::new(),
+            agent: String::new(),
+        }
     }
 }
 
@@ -24,8 +39,19 @@ pub struct StratumQuery {
         params: StratumParams,
     }
 
+impl StratumQuery {
+    pub fn new(id: i64, method: String, params: StratumParams) -> Self {
+        StratumQuery{
+            id,
+            method,
+            jsonrpc: "2.0".to_string(),
+            params,
+        }
+    }
+}
 
-#[derive(Deserialize)]
+
+#[derive(Deserialize, Debug)]
 pub struct Job {
     pub id: String,
     pub job: JobData,
@@ -35,15 +61,15 @@ pub struct Job {
 
 #[derive(Deserialize, Clone, Debug)]
 pub struct JobData {
-    blob: String,
-    job_id: String,
-    target: String,
+    pub blob: String,
+    pub job_id: String,
+    pub target: String,
     algo: String,
     height: i64,
-    seed_hash: String,
+    pub seed_hash: String,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Debug)]
 #[serde(untagged)]
 pub enum ServerReply {
     LoginReply {
@@ -57,4 +83,5 @@ pub enum ServerReply {
         method: String,
         params: JobData,
     },
+    Unknown,
 }

@@ -8,6 +8,7 @@ name="xmr_pow_challenges"
 path = "src/lib/mod.rs"
 
 [dependencies]
+hex = "0.4.3"
 rand = "0.9.2"
 randomx-rs = "1.4.1"
 serde = {version ="1.0.228", features = ["derive"]}

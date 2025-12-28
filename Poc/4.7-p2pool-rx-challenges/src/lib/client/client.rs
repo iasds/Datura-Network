@@ -45,7 +45,7 @@ impl Client {
                 }
             }
         } else {
-            Ok(DaturaPow::random(None))
+            Ok(DaturaPow::random(None,None))
         }
     }
     pub async fn new(addr: Option<String>) -> Result<Self, ClientError> {
@@ -74,10 +74,11 @@ impl Client {
                 None
             };
             let last_datura_pow = if let Some(job) = &last_job {
+                println!("creating datura pow from {:?}",job);
                 job.clone().try_into()?
             }
             else {
-                DaturaPow::random(None)
+                DaturaPow::random(None,None)
             };
             return Ok(Client {
                 addr: Some(ip_addr.clone()),
@@ -91,7 +92,7 @@ impl Client {
             addr: None,
             stream: None,
             last_job: None,
-            last_datura_pow : DaturaPow::random(None), //implement backpressure with higher diff
+            last_datura_pow : DaturaPow::random(None,None), //implement backpressure with higher diff
             last_id : 1,
         })
     }

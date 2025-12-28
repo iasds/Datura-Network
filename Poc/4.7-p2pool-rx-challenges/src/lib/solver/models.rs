@@ -46,12 +46,13 @@ impl Iterator for DaturaPow {
 
 impl TryFrom<JobData> for DaturaPow {
     type Error = SolverError;
-    fn try_from(workOrder: JobData) -> Result<Self,SolverError> {
+    fn try_from(work_order: JobData) -> Result<Self,SolverError> {
+        println!("creating daturapow from blob {} and seedhash {}",&work_order.blob, &work_order.seed_hash);
         Ok(DaturaPow {
-            job_id: workOrder.job_id,
-            blob: hex::decode(workOrder.blob)?.as_slice().try_into()?,
-            seed_hash: hex::decode(workOrder.seed_hash)?.as_slice().try_into()?,
-            target: u64::from_str_radix(&workOrder.target,16)?,
+            job_id: work_order.job_id,
+            blob: hex::decode(work_order.blob)?.as_slice().try_into()?,
+            seed_hash: hex::decode(work_order.seed_hash)?.as_slice().try_into()?,
+            target: u64::from_str_radix(&work_order.target,16)?,
             nonce: 0
         })
     }

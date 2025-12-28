@@ -11,13 +11,13 @@ async fn main() {
     println!("submitting a wrong response {:?}",solver.check_answer(&pow));
 
     println!("solving challenges for real");
-    for i in 1..100 {
+    for i in 1..5 {
         //to avoid spending time rebuiding cache and be more realistic we use the same seedhash
         let mut pow = DaturaPow::random(Some(i), Some([1u8;32]));
         let mut pow2 = pow.clone();
         let now = std::time::Instant::now();
-        let answer = solver.solve_challenge(pow).unwrap();
-        println!("solved difficulty {} in {:.2?}",i,now.elapsed());
+        let (answer,solution) = solver.solve_challenge(pow).unwrap();
+        println!("solved difficulty {} in {:.2?} with {}",i,now.elapsed(),hex::encode(&solution));
 
         let now = std::time::Instant::now();
         solver.check_answer(&answer).unwrap();
@@ -25,7 +25,7 @@ async fn main() {
         println!("");
         println!("solving with fast solver");
         let now = std::time::Instant::now();
-        let answer = solver.solve_challenge(pow2).unwrap();
+        let (answer,solution) = solver.solve_challenge(pow2).unwrap();
         println!("solved difficulty {} in {:.2?}",i,now.elapsed());
         println!("checking with fast solver");
         let now = std::time::Instant::now();
@@ -33,15 +33,21 @@ async fn main() {
         println!("checked answer in {:.2?}",now.elapsed());
         println!("");
         println!("");
+        break;
     }
 
 
     let mut client = Client::new(Some("127.0.0.1:3355".to_string()))
         .await
         .unwrap();
-    while let Ok(result) = client.get_challenge().await {
-        println!("got challenge {:?}", result);
-        let answer = solver.solve_challenge(result).unwrap();
-        break;
+    loop {
+        match client.get_challenge().await {
+            Ok(mut result) => {
+            result.target = 1;
+            let (answer,solution) = solver.solve_challenge(result).unwrap();
+            client.submit_solution(answer, solution).await.unwrap();
+            },
+            other => println!("{:?}",other),
+        }
     }
 }

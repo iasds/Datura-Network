@@ -12,7 +12,7 @@ Global Passive Adversary (GPA) threats include multiple malicious Internet Servi
 
 ![alt text](image-33.png)
 
-The shape of the traffic (the size of the packets, **and especially the amount of data being sent and recieved**, the timing at which each packet is sent, the destination as of where the packets are going), these are all characteristics that the adversary can use to deanonymize users based on their traffic patterns.
+The shape of the traffic (the size of the packets, **and especially the amount of data being sent and received**, the timing at which each packet is sent, the destination as of where the packets are going), these are all characteristics that the adversary can use to deanonymize users based on their traffic patterns.
 
 The connection/traffic logging is also long-lived, and can span several months, and can be used to correlate that client A communicated with server B.
 
@@ -89,7 +89,7 @@ the path length of each connection is chosen at random.
 
 Each Node has a private key and a public key pair. The public Key is used by every other node to encrypt traffic that only the destination can decrypt.
 
-### Nodes Pay for other nodes to either route or recieve their traffic by solving RandomX Challenges
+### Nodes Pay for other nodes to either route or receive their traffic by solving RandomX Challenges
 
 ![alt text](image-4.png)
 
@@ -108,7 +108,7 @@ For every connection that clients make, they are choosing multiple hops, in this
 
 ![alt text](image-12.png)
 
-Every node along the way does not know what the traffic they recieve is for, until they try to decrypt it, where one of the 3 following scenarios can happen: 
+Every node along the way does not know what the traffic they receive is for, until they try to decrypt it, where one of the 3 following scenarios can happen: 
 
 - Either the node can decrypt the traffic and: 
     - either they forward the traffic to the next 3 nodes,
@@ -220,13 +220,13 @@ The real hidden services (which can be websites for example) are the ones that a
 
 ![alt text](image-13.png)
 
-Naturally, given the random nature of the non-default hidden services' hashes, those will point at different neighborhoods on the hashring. This does not mean that the node is placed anywhere else on the hashring, **the node's placement on the hashring is only determined by the it's default hidden service hash**
+Naturally, given the random nature of the non-default hidden services' hashes, those will point at different neighborhoods on the hashring. This does not mean that the node is placed anywhere else on the hashring, **the node's placement on the hashring is only determined by it's default hidden service hash**
 
 ![alt text](image-14.png)
 
 Nodes advertise themselves by their default hidden service's hash. In the above example, Node A's hash is 0EAWDAWDSWA, even if it also has 2 other non-default hidden services (whose hashes are W2AWDAWDSWA and 44AWDAWDSWA respectively).
 
-### Hidden Service Destinations can select Rendez-vous nodes to recieve traffic from the clients
+### Hidden Service Destinations can select Rendez-vous nodes to receive traffic from the clients
 
 Let's say you are the above Node A, you have a non-default hidden service which you intend to use to anonymously host your website, to be reachable at the `daturan24gtdy23lxd7ht3xzx6mi7mdlkabpvuefhrjn4t5jduviw5ad.dn` hidden service.
 
@@ -283,15 +283,15 @@ So in our above example we get the following result if Node A asks nodes S, T an
 
 ![alt text](image-18.png)
 
-Thanks to this mechanism, Node A is able to recieve traffic meant for it's own hidden service, from it's designated rendezvous node(s) back to itself, **without revealing to neither Nodes S, T, or U that the requests are meant for the hidden service whose hash is 44AWDAWDSWA.**
+Thanks to this mechanism, Node A is able to receive traffic meant for it's own hidden service, from it's designated rendezvous node(s) back to itself, **without revealing to neither Nodes S, T, or U that the requests are meant for the hidden service whose hash is 44AWDAWDSWA.**
 
 ## Hidden Services are told where to route responses back to a rendezvous node chosen by the clients:
 
 ![alt text](image-20.png)
 
-In order for clients to recieve responses from hidden services, they have to tell them where to route traffic back to. 
+In order for clients to receive responses from hidden services, they have to tell them where to route traffic back to. 
 
-Therefore in the same fashion that hidden services pick a rendezvous node to be able to recieve traffic that's meant for them, we have clients choosing rendezvous nodes to be able to recieve traffic that's meant for them, coming from hidden service destinations, allowing them to remain anonymous from a potentially malicious hidden service.
+Therefore in the same fashion that hidden services pick a rendezvous node to be able to receive traffic that's meant for them, we have clients choosing rendezvous nodes to be able to receive traffic that's meant for them, coming from hidden service destinations, allowing them to remain anonymous from a potentially malicious hidden service.
 
 ![alt text](image-22.png)
 
@@ -343,7 +343,7 @@ The sequence to send requests to hidden services is as follows:
 
 2) Alice sends the information of what the traffic must look like to RDV Node D11, by going through RDV Node D1
 3) RDV Node D1, (which was chosen by the hidden service node B), routes the traffic to the decoy destinations
-4) All decoy destination nodes recieve the packet and are told to forward it back to the RDV node chosen by the client
+4) All decoy destination nodes receive the packet and are told to forward it back to the RDV node chosen by the client
 5) RDV Node D11, (which was chosen by the client A), forwards the message back to the decoy sources to tell them what the traffic they must send looks like
 6) all 8 sources (7 decoy sources, 1 real source), are told what the traffic they must send looks like, so they send it (only 1 traffic is real, the 7 others just send noise traffic that looks exactly the same from the outside)
 
@@ -351,7 +351,7 @@ The sequence to send requests to hidden services is as follows:
 
 7) now that all 8 sources are told what the traffic they must send looks like, they all send it to RDV node D1
 8) RDV Node D1 forwards the real traffic to all 8 Decoy Destinations (and discards the 7 other noise traffic)
-9) All 8 destinations recieve the same traffic
+9) All 8 destinations receive the same traffic
 
 End result: is that if Node B is a malicious hidden service with the monitoring capability of a global passive adversary, Client A is not deanonymizing themselves with their bandwidth consumption to that adversary because there is always an anonymity set of 1 out of 8 possible sources (7 of which are decoy sources), that have sent the same amount of traffic to the RDV node D1 (which was chosen by the hidden service).
 
@@ -372,8 +372,8 @@ To receive responses from hidden services, the sequence is the same except that 
 
 ![alt text](image-32.png)
 
-15) all Decoy Destinations recieved the information of how the response traffic should look like, so they send traffic that looks exactly like the real response from Node B
-16) All sources recieve the hidden service response, via RDV Node D11.
+15) all Decoy Destinations received the information of how the response traffic should look like, so they send traffic that looks exactly like the real response from Node B
+16) All sources receive the hidden service response, via RDV Node D11.
 
 End result: even if client Node A is a malicious adversary with the capabilities of a global passive adversary, they can't deanonymize Hidden service Node B via their bandwidth consumption because they always have an anonymity set of 1 out of 8 possible destinations (7 of which are decoy destinations), all 8 destinations have sent 50 Gb of traffic, and all 8 destinations have received 100Gb of traffic.
 

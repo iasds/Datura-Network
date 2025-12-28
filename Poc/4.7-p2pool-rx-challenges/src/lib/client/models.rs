@@ -24,7 +24,7 @@ pub enum StratumParams {
 impl StratumParams {
     pub fn empty_login() -> Self {
         Self::LoginParams {
-            login: String::new(),
+            login: "DaturaNet Worker".to_string(),
             pass: String::new(),
             agent: String::new(),
         }
@@ -65,8 +65,14 @@ pub struct JobData {
     pub job_id: String,
     pub target: String,
     algo: String,
-    height: i64,
+    height: u64,
     pub seed_hash: String,
+}
+
+#[derive(Deserialize, Debug)]
+pub struct MinerLoginReply{
+    pub id: String,
+    pub job: JobData,
 }
 
 #[derive(Deserialize, Debug)]
@@ -76,7 +82,7 @@ pub enum ServerReply {
         jsonrpc: String,
         id: i64,
         error: Option<String>,
-        result: Job,
+        result: MinerLoginReply,
     },
     WorkOrder {
         jsonrpc: String,

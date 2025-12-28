@@ -1,8 +1,16 @@
 use super::models::*;
+use std::collections::HashMap;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::TcpStream;
 use crate::solver::DaturaPow;
 use super::errors::ClientError;
+use std::time::Instant;
+use super::solver::check_hash;
+
+struct ShareInfo {
+    pub target: u64,
+    pub date: Instant,
+}
 
 pub struct Client {
     addr: Option<String>,
@@ -10,15 +18,41 @@ pub struct Client {
     last_job: Option<JobData>,
     last_datura_pow: DaturaPow,
     last_id: i64,
+    worker_id: Option<String>,
+    job_list: HashMap<String,ShareInfo>,
 }
 
 impl Client {
     pub async fn submit_solution(&mut self, pow: DaturaPow, solution: Vec<u8>) -> Result<(),ClientError> {
+        if let Some(ShareInfo{target,..}) = &self.job_list.get(&pow.job_id) {
+            if check_hash(solution.as_slice(), target) {
         self.last_id += 1;
-        let submission = StratumQuery::new(self.last_id, StratumParams::SubmitParams {
-            id: self.last_id,
+        let submission = StratumQuery::new(self.last_id,"submit".to_string(), StratumParams::SubmitParams {
+            id: self.worker_id.clone().unwrap(),
             job_id: pow.job_id,
             nonce: pow.nonce.to_string(),
+            result: hex::encode(&solution),
+        });
+            let submission_str = serde_json::to_string(&submission)?;
+
+            if let Some(reader) = &mut self.stream {
+                reader
+                    .get_mut()
+                    .write_all(format!("{}\n", submission_str).as_bytes())
+                    .await?;
+            }
+
+
+            }
+            else {
+                println!("result target {} is lower than recorded {}, not submitting",pow.target,target);
+            }
+        }
+        else {
+            println!("not in the list");
+        }
+            Ok(())
+
 
     }
 
@@ -75,16 +109,17 @@ impl Client {
                 .await?;
             let mut line = String::new();
             reader.read_line(&mut line).await.unwrap();
-            let last_job = if let ServerReply::LoginReply { result, .. } =
+            let (last_job,worker_id): (Option<JobData>,Option<String>) = if let ServerReply::LoginReply { result, .. } =
                 serde_json::from_str(&line).unwrap()
             {
-                Some(result.job)
+                (Some(result.job),Some(result.id.clone()))
             } else {
-                None
+                (None,None)
             };
-            let last_datura_pow = if let Some(job) = &last_job {
-                println!("creating datura pow from {:?}",job);
-                job.clone().try_into()?
+            let last_datura_pow:DaturaPow = if let Some(job) = &last_job {
+                let pow = job.clone().try_into()?;
+                self.job_list.insert(job.job_id,ShareInfo{ date: Instant::now(),target: pow.target});
+                pow
             }
             else {
                 DaturaPow::random(None,None)
@@ -95,6 +130,8 @@ impl Client {
                 last_job,
                 last_datura_pow,
                 last_id : 2,
+                worker_id,
+                job_list: HashMap::new(),
             });
         }
         Ok(Client {
@@ -103,6 +140,7 @@ impl Client {
             last_job: None,
             last_datura_pow : DaturaPow::random(None,None), //implement backpressure with higher diff
             last_id : 1,
+            worker_id: None,
         })
     }
 }

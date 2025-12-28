@@ -4,20 +4,30 @@ use xmr_pow_challenges::{Solver,Client,SolverMode,DaturaPow};
 async fn main() {
     println!("creating a single thread light solver");
     let mut solver = Solver::new(SolverMode::Light,1).unwrap();
-    println!("light solver created");
+    let mut fast_solver = Solver::new(SolverMode::Fast,1);
     let mut pow = DaturaPow::random(None,None);
     println!("created a random pow {:?}",pow);
 
     println!("submitting a wrong response {:?}",solver.check_answer(&pow));
 
     println!("solving challenges for real");
-    for i in 0..10 {
+    for i in 1..100 {
         //to avoid spending time rebuiding cache and be more realistic we use the same seedhash
         let mut pow = DaturaPow::random(Some(i), Some([1u8;32]));
+        let mut pow2 = pow.clone();
         let now = std::time::Instant::now();
         let answer = solver.solve_challenge(pow).unwrap();
         println!("solved difficulty {} in {:.2?}",i,now.elapsed());
 
+        let now = std::time::Instant::now();
+        solver.check_answer(&answer).unwrap();
+        println!("checked answer in {:.2?}",now.elapsed());
+        println!("");
+        println!("solving with fast solver");
+        let now = std::time::Instant::now();
+        let answer = solver.solve_challenge(pow2).unwrap();
+        println!("solved difficulty {} in {:.2?}",i,now.elapsed());
+        println!("checking with fast solver");
         let now = std::time::Instant::now();
         solver.check_answer(&answer).unwrap();
         println!("checked answer in {:.2?}",now.elapsed());

@@ -4,7 +4,7 @@ use super::errors::SolverError;
 
 ///Structure for datura network proof of work, can be autonomously generated
 ///or created from a p2pool job
-#[derive(Debug)]
+#[derive(Debug,Clone)]
 pub struct DaturaPow {
     pub blob: [u8;76],
     pub seed_hash: [u8;32],

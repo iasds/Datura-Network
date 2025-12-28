@@ -46,7 +46,7 @@ impl Iterator for DaturaPow {
 
 impl TryFrom<JobData> for DaturaPow {
     type Error = SolverError;
-    fn try_from(workOrder: JobData) -> Result<DaturaPow,SolverError> {
+    fn try_from(workOrder: JobData) -> Result<Self,SolverError> {
         Ok(DaturaPow {
             job_id: workOrder.job_id,
             blob: hex::decode(workOrder.blob)?.as_slice().try_into()?,
@@ -58,6 +58,8 @@ impl TryFrom<JobData> for DaturaPow {
 }
 
 impl DaturaPow {
+
+    pub fn into_jobData
 
     pub fn next_nonce(&mut self) -> Self {
         let mut newblob = self.blob;

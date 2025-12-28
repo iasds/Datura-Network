@@ -13,6 +13,10 @@ pub struct Client {
 }
 
 impl Client {
+    pub async fn submit_solution(&mut self, pow: DaturaPow) -> Result<(),ClientError> {
+
+    }
+
     //reimplement as stream with a running loop
     pub async fn get_challenge(&mut self) -> Result<DaturaPow,ClientError> {
         let mut line = String::new();

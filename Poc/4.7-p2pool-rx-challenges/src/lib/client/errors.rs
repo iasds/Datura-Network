@@ -13,6 +13,8 @@ pub enum ClientError {
     ParseError(String),
     #[error("error converting job to DaturaPow")]
     ConversionError(SolverError),
+    #[error("share was refused by the server")]
+    ShareError(String),
 }
 
 impl From<SolverError> for ClientError {

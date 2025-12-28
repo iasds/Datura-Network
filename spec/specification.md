@@ -273,9 +273,9 @@ The problem here is that Node A needs Node S to continue routing the requests ba
 
 So this feature is meant to do just that: you can request Nodes to route traffic for you, based on the hash that's being requested to them, and you can tell them to route the traffic to other nodes asking for a different hash aswell:
 
-![alt text](image-8.png)
-
 ![alt text](image-9.png)
+
+![alt text](image-54.png)
 
 ![alt text](image-10.png)
 

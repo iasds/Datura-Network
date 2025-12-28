@@ -1,6 +1,6 @@
 <mxfile host="Electron" agent="Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) draw.io/28.1.2 Chrome/138.0.7204.243 Electron/37.4.0 Safari/537.36" version="28.1.2">
   <diagram name="Page-1" id="S9D7jUQbE6i2tRA_tAo8">
-    <mxGraphModel dx="12516" dy="2609" grid="0" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="0" pageScale="1" pageWidth="850" pageHeight="1100" math="0" shadow="0">
+    <mxGraphModel dx="12087" dy="2357" grid="0" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="0" pageScale="1" pageWidth="850" pageHeight="1100" math="0" shadow="0">
       <root>
         <mxCell id="0" />
         <mxCell id="1" parent="0" />
@@ -6676,8 +6676,8 @@
         <mxCell id="Ngk5pmv2VPOzCpttfcHT-36" value="&quot;Hey Y, if you recieve packets asking for the hash 33AWDDTKWD, &lt;br&gt;then route packets back to Z, Z1 and Z2, asking for the hash 22DWAIMFASX&quot;" style="text;html=1;align=center;verticalAlign=middle;resizable=0;points=[];autosize=1;strokeColor=none;fillColor=none;" parent="1" vertex="1">
           <mxGeometry x="-6602.5" y="-1116" width="431" height="41" as="geometry" />
         </mxCell>
-        <mxCell id="Ngk5pmv2VPOzCpttfcHT-37" value="&quot;Hey Y, if you recieve packets asking for the hash 33AWDDTKWD,&lt;br&gt;then route packets back to Z, Z1 and Z2, asking for the hash 22DWAIMFASX&quot;" style="text;html=1;align=center;verticalAlign=middle;resizable=0;points=[];autosize=1;strokeColor=none;fillColor=none;" parent="1" vertex="1">
-          <mxGeometry x="-6612.5" y="-1007" width="431" height="41" as="geometry" />
+        <mxCell id="Ngk5pmv2VPOzCpttfcHT-37" value="&quot;Hey Z, if you receive packets asking for the hash 22DWAIMFASX&lt;br&gt;then route packets back to A, A1 and A2, asking for the hash 11UHWFILAJD&quot;" style="text;html=1;align=center;verticalAlign=middle;resizable=0;points=[];autosize=1;strokeColor=none;fillColor=none;" parent="1" vertex="1">
+          <mxGeometry x="-6610.5" y="-1007" width="428" height="41" as="geometry" />
         </mxCell>
         <mxCell id="Ngk5pmv2VPOzCpttfcHT-38" value="Node A1" style="ellipse;whiteSpace=wrap;html=1;aspect=fixed;" parent="1" vertex="1">
           <mxGeometry x="-6985" y="-956" width="45" height="45" as="geometry" />
@@ -6742,8 +6742,8 @@
         <mxCell id="Ngk5pmv2VPOzCpttfcHT-54" value="Node X&lt;br&gt;(RDV)" style="ellipse;whiteSpace=wrap;html=1;aspect=fixed;fillColor=#fa6800;fontColor=#000000;strokeColor=#C73500;" parent="1" vertex="1">
           <mxGeometry x="-6670.25" y="-746" width="45" height="45" as="geometry" />
         </mxCell>
-        <mxCell id="Ngk5pmv2VPOzCpttfcHT-59" value="&quot;OK i&#39;ll do it if you slove this PoW&quot;" style="text;html=1;align=center;verticalAlign=middle;resizable=0;points=[];autosize=1;strokeColor=none;fillColor=none;" parent="1" vertex="1">
-          <mxGeometry x="-6506.5" y="-736" width="198" height="26" as="geometry" />
+        <mxCell id="Ngk5pmv2VPOzCpttfcHT-59" value="X:&quot;OK i&#39;ll do it if you solve this PoW&quot;" style="text;html=1;align=center;verticalAlign=middle;resizable=0;points=[];autosize=1;strokeColor=none;fillColor=none;" parent="1" vertex="1">
+          <mxGeometry x="-6512.5" y="-736" width="210" height="26" as="geometry" />
         </mxCell>
         <mxCell id="Ngk5pmv2VPOzCpttfcHT-60" value="Node Y1" style="ellipse;whiteSpace=wrap;html=1;aspect=fixed;" parent="1" vertex="1">
           <mxGeometry x="-6722" y="-678.75" width="45" height="45" as="geometry" />
@@ -6757,11 +6757,11 @@
         <mxCell id="Ngk5pmv2VPOzCpttfcHT-63" value="Node Z2" style="ellipse;whiteSpace=wrap;html=1;aspect=fixed;" parent="1" vertex="1">
           <mxGeometry x="-6620.5" y="-578.75" width="45" height="45" as="geometry" />
         </mxCell>
-        <mxCell id="Ngk5pmv2VPOzCpttfcHT-64" value="&quot;OK i&#39;ll do it if you slove this PoW&quot;" style="text;html=1;align=center;verticalAlign=middle;resizable=0;points=[];autosize=1;strokeColor=none;fillColor=none;" parent="1" vertex="1">
-          <mxGeometry x="-6493.5" y="-631" width="198" height="26" as="geometry" />
+        <mxCell id="Ngk5pmv2VPOzCpttfcHT-64" value="Y:&quot;OK i&#39;ll do it if you solve this PoW&quot;" style="text;html=1;align=center;verticalAlign=middle;resizable=0;points=[];autosize=1;strokeColor=none;fillColor=none;" parent="1" vertex="1">
+          <mxGeometry x="-6498.5" y="-631" width="209" height="26" as="geometry" />
         </mxCell>
-        <mxCell id="Ngk5pmv2VPOzCpttfcHT-65" value="&quot;OK i&#39;ll do it if you slove this PoW&quot;" style="text;html=1;align=center;verticalAlign=middle;resizable=0;points=[];autosize=1;strokeColor=none;fillColor=none;" parent="1" vertex="1">
-          <mxGeometry x="-6503.5" y="-522" width="198" height="26" as="geometry" />
+        <mxCell id="Ngk5pmv2VPOzCpttfcHT-65" value="Z:&quot;OK i&#39;ll do it if you solve this PoW&quot;" style="text;html=1;align=center;verticalAlign=middle;resizable=0;points=[];autosize=1;strokeColor=none;fillColor=none;" parent="1" vertex="1">
+          <mxGeometry x="-6508.5" y="-522" width="209" height="26" as="geometry" />
         </mxCell>
         <mxCell id="Ngk5pmv2VPOzCpttfcHT-66" value="Node A1" style="ellipse;whiteSpace=wrap;html=1;aspect=fixed;" parent="1" vertex="1">
           <mxGeometry x="-6993" y="-479" width="45" height="45" as="geometry" />

@@ -141,6 +141,7 @@ impl Client {
             last_datura_pow : DaturaPow::random(None,None), //implement backpressure with higher diff
             last_id : 1,
             worker_id: None,
+            job_list: HashMap::new(),
         })
     }
 }

@@ -8,7 +8,7 @@ use super::errors::SolverError;
 pub struct DaturaPow {
     pub blob: [u8;76],
     pub seed_hash: [u8;32],
-    job_id: String,
+    pub job_id: String,
     pub target: u64,
 
     ///if this pow is sent back as a solution then its nonce will be set
@@ -58,9 +58,6 @@ impl TryFrom<JobData> for DaturaPow {
 }
 
 impl DaturaPow {
-
-    pub fn into_jobData
-
     pub fn next_nonce(&mut self) -> Self {
         let mut newblob = self.blob;
         let solver_nonce = u16::wrapping_add(u16::from_le_bytes(newblob[74..].try_into().unwrap()) , 1);

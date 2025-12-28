@@ -13,7 +13,12 @@ pub struct Client {
 }
 
 impl Client {
-    pub async fn submit_solution(&mut self, pow: DaturaPow) -> Result<(),ClientError> {
+    pub async fn submit_solution(&mut self, pow: DaturaPow, solution: Vec<u8>) -> Result<(),ClientError> {
+        self.last_id += 1;
+        let submission = StratumQuery::new(self.last_id, StratumParams::SubmitParams {
+            id: self.last_id,
+            job_id: pow.job_id,
+            nonce: pow.nonce.to_string(),
 
     }
 

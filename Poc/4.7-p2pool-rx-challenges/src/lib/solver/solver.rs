@@ -69,7 +69,7 @@ impl Solver {
         Err(SolverError::DaturaPowInvalidResponse)
     }
     
-    pub fn solve_challenge(&mut self,mut challenge: DaturaPow) -> Result<DaturaPow, SolverError> {
+    pub fn solve_challenge(&mut self,mut challenge: DaturaPow) -> Result<(DaturaPow,Vec<u8>), SolverError> {
         self.prepare_vm(&challenge)?;
         let mut prev_nonce = challenge.nonce;
         loop {
@@ -80,7 +80,7 @@ impl Solver {
             prev_nonce = curnonce;
             let solution = self.vm.calculate_hash(&challenge.blob)?;
             if check_hash(solution.as_slice().try_into().unwrap(), challenge.target) {
-                return Ok(challenge);
+                return Ok((challenge,solution));
             }
             challenge.next_nonce();
         }

@@ -25,10 +25,7 @@
       {
         packages.default =
 
-          (pkgs.makeRustPlatform {
-            cargo = toolchain;
-            rustc = toolchain;
-          }).buildRustPackage
+          pkgs.rustPlatform.buildRustPackage
             {
               pname = "xmr-pow-challenges";
               nativeBuildInputs = with pkgs; [cmake ];

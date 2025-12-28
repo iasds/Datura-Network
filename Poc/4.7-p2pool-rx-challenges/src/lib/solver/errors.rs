@@ -13,6 +13,13 @@ pub enum SolverError{
     HexToSliceError(String),
     #[error("error creating daturaPoW challenge")]
     DaturaPowCreationError(String),
+    #[error("challenge response is invalid")]
+    DaturaPowInvalidResponse,
+    #[error("ran out of possible nonces trying to solve")]
+    DaturaPowExhaustedSearchSpace,
+    #[error("error with the underlying randomX process")]
+    SolverRandomXError(String),
+
 }
 
 impl From<ParseIntError> for SolverError {
@@ -30,5 +37,11 @@ impl From<hex::FromHexError> for SolverError {
 impl From<TryFromSliceError> for SolverError {
     fn from(err: TryFromSliceError) -> Self {
         SolverError::HexToSliceError(err.to_string())
+    }
+}
+
+impl From<randomx_rs::RandomXError> for SolverError {
+    fn from(err: randomx_rs::RandomXError) -> Self {
+        SolverError::SolverRandomXError(err.to_string())
     }
 }

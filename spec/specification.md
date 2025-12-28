@@ -1,4 +1,4 @@
-# Datura Network Specification v0.4 (DRAFT)
+# Datura Network Specification v0.5 (DRAFT)
 
 ## The Threat Model
 
@@ -377,6 +377,77 @@ To receive responses from hidden services, the sequence is the same except that 
 
 End result: even if client Node A is a malicious adversary with the capabilities of a global passive adversary, they can't deanonymize Hidden service Node B via their bandwidth consumption because they always have an anonymity set of 1 out of 8 possible destinations (7 of which are decoy destinations), all 8 destinations have sent 50 Gb of traffic, and all 8 destinations have received 100Gb of traffic.
 
+### Incentives to run Datura Nodes (Theoretical Anonymity Set and Real Anonymity Set)
+
+as shown above, the targeted Anonymity set is a default of 1/8. But thing is, that's a theoretical anonymity set of 1/8 assuming that the adversary isn't running all of your nodes:
+
+![alt text](image-49.png)
+
+In the example above, the theoretical Anonymity set for Hidden Service Node B is 1/8 only If the adversary is not running the decoy nodes 2 to 8
+
+However if the adversary is running decoy nodes 2 to 8, then Hidden service Node B's anonymity set is 1/1, because the adversary is aware of what the decoy nodes are.
+
+Therefore, this is where the incentives to run Datura nodes comes in. We will make it clear to the users that **the only way to stop sybil deanonymization attacks is to use nodes that you trust (meaning nodes that you control) for the critical parts of your circuit.**
+
+If you don't control decoy nodes 2 to 8, then there will always be uncertainty regarding the legitimacy of those nodes, you will never know if a legit privacy advocate or the adversary is running them. 
+
+But if you're Bob and you control let's say Nodes 2, 3, and 4, and you ensure that your datura client always chooses them in your circuits as decoy destinations, then you have the following configuration:
+
+![alt text](image-47.png)
+
+Thanks to Bob running Nodes 2, 3 and 4, and using them as his decoy destinations, **Bob KNOWS that his anonymity set is at least 1/4** out of a total theorical 1/8 anonymity set.
+
+The Anonymity set for Hidden Service Node B is 1/8 only If the adversary is not running the decoy nodes 5 to 8. If the adversary is running the other decoy nodes 5 to 8 that bob doesn't have control of, then Hidden service Node B's anonymity set is 1/4. **The adversary anyway does not control the remaining Nodes 2,3 and 4 because those are under Bob's control.**
+
+Ideally, the user controls 8 nodes, to be able to have a non-theoretical anonymity set of 1/8:
+
+![alt text](image-50.png)
+
+**If Bob is running Nodes 2 to 8, and he is using them as his decoy destinations, therefore he KNOWS that his anonymity set is at least 1/8.** It doesn't matter If the adversary is running any other node in the circuit, the Hidden service Node B's anonymity set remains 1/8 because only Bob knows which node is the real destination (himself), and which other nodes are the decoy destinations.
+
+This distinction between theoretical anonymity set and real anonymity set will be constantly reminded to the users, **as long as they don't have a total of 8 trusted nodes to use as their decoy destinations.** This is to push users to run nodes to further decentralize the network and to use them as their decoy destinations. The users should not have to trust a random set of nodes that are not in their control, this is a fundamental requirement to be able to achieve online anonymity, it has a cost and we're always going to be 100% honest and upfront about it.
+
+### Verifying if the rest of the network nodes behave as intended 
+
+Sybil attacks in particular require that the network has a defined and strictly-enforced protocol that ensures any deviation from how the protocol is supposed to function serves as the basis to rejecting nodes.
+
+Given the context that you can't inspect that the adversary's nodes are running the datura binary, (as their customized client will always lie that they are running the binary of the correct hash for instance), you're anyway forced into treating the nodes that you don't control as a black box that you can't look into.
+
+The only thing we can do to ward off Sybil attacks is to ensure the protocol is strictly enforced and it's behavior to be easily verifiable from the outside.
+
+If you run only one node, your ability to verify that nodes behave as expected is fairly limited, as shown in the below example:
+
+![alt text](image-48.png)
+
+But given the context of allowing users to trust the other nodes that they run, we can expand our protocol-enforcement capabilities, for example if you run 2 nodes, you can now verify that nodes behave as expected when tasked to forward traffic for you, as decoy nodes:
+
+![alt text](image-51.png)
+
+Or in the following example where you run 3 nodes, you can verify the validity of the nodes behavior even better:
+
+![alt text](image-52.png)
+
+The easier the network protocol behavior is to verify on nodes from the outside, the better, because this means that any maliciously-operated node that exhibits deviations from how it should function can easily be rejected by the rest of the network.
+
+**This still does not stop the adversary from running a customized client on their infrastructure that does nothing more than logging connections without displaying any deviations from the protocol from the outside,** but that's a risk that we mitigate by ensuring that only the end users know where the decoy source nodes are, making sure that only the hidden service destinations know where the decoy destination nodes are, and by motivating the users to run their decoy nodes.
+
+### Gradual bandwidth allocation over 7 days
+
+First of all, this feature is there to avoid the sybil attack problem that i2p faces:
+
+![alt text](image-53.png)
+
+The bandwidth allocation and ability for nodes to be used to route traffic for other nodes is restricted based on their uptime, and is divided into 4 phases:
+
+- **phase 0 (0-1 day uptime):** your node is strictly only a client, your node can request other nodes (that have at least 24h uptime) to route traffic for you. And you only get a few rare nodes asking to route traffic for you (once every few hours) to test if your node is legit or not. You can get up to 100 nodes connections at a time, and use up to 10% of your available bandwidth.
+- **phase 1 (1-2 days uptime):** your node is now forced to mine a 30-minute long PoW to be officially listed amongst the rest of the available nodes to process traffic for the rest of the network. Your node starts to accept frequent nodes requests to route traffic, up to 1000 nodes connections at a time and use up to 30% of your available bandwidth.
+- **phase 2 (2-7 days uptime):** your node is now forced to mine a 30-minute long PoW again to enter phase 2, once completed, your node gradually accepts more and more routing requests up until it arrives at it's 100% bandwidth usage
+- **phase 3 (7-30 days uptime):**  your node is now forced to mine a 30-minute long PoW again to enter phase 3, once completed, your node knows what it's 100% bandwidth usage is and stays there accepting connections at that defined maximum rate for the next 23 days. (after those 23 days are over, the node switches back to Phase 2 again to re-evaluate it's maximal bandwidth capacity)
+
+The 30-minute long PoWs are there as a safeguard to prevent an adversary to attempting to spin up an extremely large amount of nodes to try and force all traffic through their nodes and centralize the network.
+
+Combined with monero's way of restricting the amount of nodes per IP subnet, this makes it extremely expensive for an adversary to conduct a sybil attack against the network.
+
 #### Bonus: Decoy Sources and Destinations combined with probabilistic path lengths:
 
 ![alt text](image-35.png)
@@ -402,6 +473,8 @@ If the clients or hidden service administrators choose, they can configure their
 ![alt text](image-39.png)
 
 Take note that this is also the smallest hashring that there can be on the datura network, there needs to be at least 4 nodes for the network to be able to function.
+
+
 
 ### Datura Exit Nodes to access other Darknets (like Tor and i2p)
 

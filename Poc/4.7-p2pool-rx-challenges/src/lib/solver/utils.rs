@@ -1,14 +1,52 @@
-pub fn check_hash(hash: &[u8; 32], difficulty: u64) -> bool {
-    let mut carry: u128 = 0;
 
-    // walk through 32 bytes 8 at a time (u64 chunks)
-    for i in (0..32).step_by(8) {
-        let part = u64::from_le_bytes(hash[i..i+8].try_into().unwrap()) as u128;
-        let prod = part * difficulty as u128 + carry;
-        carry = prod >> 64;
+///Calculate hash difficulty from a hash for filtering and routing shares
+pub fn hash_to_difficulty(hash: &[u8; 32]) -> u64 {
+    let mut parts = [0u64; 4];
+    for i in 0..4 {
+        parts[i] = u64::from_be_bytes(hash[i*8..i*8+8].try_into().unwrap());
     }
 
-    // if carry == 0 after processing all chunks => hash meets difficulty
-    carry == 0
-}
+    // special case: all zero hash => infinite difficulty, clamp to u64::MAX
+    if parts.iter().all(|&x| x == 0) {
+        return u64::MAX;
+    }
 
+    // We compute (2^256 - 1) // hash but only need the top 64 bits of the quotient.
+    //
+    // Since difficulty outputs are typically capped to u64, we can use a small
+    // big-integer divide in place. This avoids requiring a full bigint library.
+
+    // Numerator = (2^256-1) represented as u64[4] = all ones
+    let mut num = [u64::MAX; 4];
+    let mut den = parts;
+
+    // manual big integer division: only compute the top 64-bit word of the quotient
+    // (classic restoring division adapted to fixed 4-word width)
+    let mut quotient_hi: u64 = 0;
+    for _ in 0..64 {
+        // left-shift numerator by 1
+        let mut carry = 0u64;
+        for x in num.iter_mut().rev() {
+            let next = (*x >> 63) & 1;
+            *x = (*x << 1) | carry;
+            carry = next;
+        }
+
+        quotient_hi <<= 1;
+
+        // compare num and den
+        let ge = num >= den;
+        if ge {
+            // num -= den
+            let mut borrow = 0u64;
+            for (x, y) in num.iter_mut().rev().zip(den.iter().rev()) {
+                let (nx, b) = x.overflowing_sub(*y + borrow);
+                *x = nx;
+                borrow = b as u64;
+            }
+            quotient_hi |= 1;
+        }
+    }
+
+    quotient_hi
+}

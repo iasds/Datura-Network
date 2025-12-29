@@ -1,6 +1,19 @@
+use crate::consts::*;
 use rand::fill;
 use crate::client::JobData;
 use super::errors::SolverError;
+
+pub enum SolverJob {
+    Verify(DaturaPow,Vec<u8>),
+    Solve((DaturaPow, Duration)),
+}
+
+pub enum SolverResult {
+    Valid(DaturaPow),
+    Invalid((DaturaPow,SolverError)),
+    Solved((DaturaPow,Vec<u8>)),
+    Error(SolverError),
+}
 
 ///Structure for datura network proof of work, can be autonomously generated
 ///or created from a p2pool job
@@ -24,7 +37,6 @@ impl Iterator for DaturaPow {
     fn next(&mut self) -> Option<Self::Item> {
         let mut newblob = self.blob;
 
-           // Example: upper 16 bits already set for client
         let mut client =  u16::wrapping_add(u16::from_le_bytes(newblob[72..74].try_into().unwrap()), 1);
 
         // Iterate lower 16 bits
@@ -63,7 +75,7 @@ impl DaturaPow {
         let mut newblob = self.blob;
         let solver_nonce = u16::wrapping_add(u16::from_le_bytes(newblob[74..].try_into().unwrap()) , 1);
 
-        newblob[74..].copy_from_slice(&solver_nonce.to_le_bytes());
+        newblob[NONCE_OFFSET + NONCE_SIZE / 2..NONCE_OFFSET + NONCE_SIZE].copy_from_slice(&solver_nonce.to_le_bytes());
 
         self.blob = newblob.clone();
         self.nonce = solver_nonce;

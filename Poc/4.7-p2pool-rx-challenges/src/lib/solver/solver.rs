@@ -2,6 +2,11 @@ use randomx_rs::*;
 use crate::SolverError;
 use crate::DaturaPow;
 use super::utils::check_hash;
+use tokio::sync::mpsc;
+use std::time::{Instant, Duration};
+use super::worker::Worker;
+
+
 
 
 ///Solver for challenge completion and verification
@@ -10,9 +15,14 @@ use super::utils::check_hash;
 pub struct Solver {
     vm: RandomXVM,
     mode: SolverMode,
-    threads: u8,
+    solvers: Vec<Worker>,
+    verifier: Worker,
     flags: RandomXFlag,
     seed: [u8;32],
+    pub feed_route: mpsc::Sender<SolverJob>,
+    receiver: mpsc::Receiver<SolverJob>,
+    job_results: mpsc::Sender<SolverResult>,
+
 }
 
 #[derive(Copy,Debug,Clone,PartialEq)]
@@ -72,26 +82,27 @@ impl Solver {
             challenge.next_nonce();
         }
     }
-    pub fn new(mode: SolverMode, threads: u8) -> Result<Self,SolverError> {
-        let flags = RandomXFlag::get_recommended_flags() | (
-            if mode == SolverMode::Fast {
-                RandomXFlag::FLAG_LARGE_PAGES | RandomXFlag::FLAG_FULL_MEM
-            }
-            else {
-                RandomXFlag::empty()
-            });
-        let cache = RandomXCache::new(flags,&[0u8;32])?;
+
+    ///If creating with multiple threads one will be a dedicated verification thread and priorize
+    ///verification work
+    pub fn new(mode: SolverMode, mut nb_threads: usize) -> Result<Self,SolverError> {
+        nb_threads = min(nb_threads,num_cpus::get());
+        let cache = Arc::new(RwLock::new(RandomXCache::new(flags,&[0u8;32])?)); //always at least one worker thread
         let dataset = if mode==SolverMode::Fast {
             Some(RandomXDataset::new(flags, cache.clone(),0)?)
         }
         else {
             None
         };
-        Ok(Solver {
-            vm: RandomXVM::new(flags, Some(cache), dataset)?,
-            mode,
-            flags,
-            seed: [0u8;32],
-        threads})
+
+
+        let mut verifier = Worker::new(Some(cache), solver_tx
+        let mut workers = Vec::new();
+        for i in 0..nb_threads - 1 {
+            if i == 0 {
+                //first worker is a verifier
+            }
+        }
+
     }
 }

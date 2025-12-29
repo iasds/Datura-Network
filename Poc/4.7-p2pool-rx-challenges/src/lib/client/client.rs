@@ -5,7 +5,8 @@ use tokio::net::TcpStream;
 use crate::solver::DaturaPow;
 use super::errors::ClientError;
 use std::time::Instant;
-use super::solver::check_hash;
+use super::solver::hash_to_difficulty;
+use tokio::sync::oneshot;
 
 struct ShareInfo {
     pub target: u64,
@@ -22,10 +23,14 @@ pub struct Client {
     job_list: HashMap<String,ShareInfo>,
 }
 
+pub type P2poolReply : Result<(),PoolError>;
+
 impl Client {
-    pub async fn submit_solution(&mut self, pow: DaturaPow, solution: Vec<u8>) -> Result<(),ClientError> {
+    pub async fn submit_solution(&mut self, pow: DaturaPow, solution: Vec<u8>) -> Result<Option<oneshot<P2PoolReply>>,ClientError> {
         if let Some(ShareInfo{target,..}) = &self.job_list.get(&pow.job_id) {
-            if check_hash(solution.as_slice(), target) {
+            if hash_to_difficulty(solution.as_slice()) >= target {
+            //schedule a verification with the solver
+
         self.last_id += 1;
         let submission = StratumQuery::new(self.last_id,"submit".to_string(), StratumParams::SubmitParams {
             id: self.worker_id.clone().unwrap(),
@@ -40,6 +45,8 @@ impl Client {
                     .get_mut()
                     .write_all(format!("{}\n", submission_str).as_bytes())
                     .await?;
+
+                //send back a future while we wait for the response
             }
 
 
@@ -49,9 +56,9 @@ impl Client {
             }
         }
         else {
-            println!("not in the list");
+            return Err(CleintError::UnknownJob);
         }
-            Ok(())
+            Ok(false)
 
 
     }

@@ -496,7 +496,7 @@ Datura Exit node runners will be provided the following:
 
 - a complete tutorial on how to run clearnet exit nodes
 - a basic php / html website template to enable them to :
-    - list the tor exit nodes that are being ran by the administrator (this list is hidden by default)
+    - list the datura clearnet exit nodes that are being ran by the administrator (this list is hidden by default)
     - interface with a local monero node RPC
     - configure the cost of having an exit node revealed to the users
     - configure the amount of seats that a given exit node has (to restrict the maximum amount of users that can pay to get an exit node revealed to them)

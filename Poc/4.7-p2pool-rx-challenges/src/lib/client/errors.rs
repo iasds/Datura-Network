@@ -27,4 +27,6 @@ pub enum PoolError {
     InvalidJobId,
     #[error("invalid share")]
     InvalidShare,
+    #[error("low difficulty share")]
+    LowDifficultyShare,
 }

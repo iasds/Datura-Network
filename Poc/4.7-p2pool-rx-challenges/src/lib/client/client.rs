@@ -1,12 +1,11 @@
 use super::models::*;
 use std::collections::HashMap;
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::io::BufReader;
 use tokio::net::TcpStream;
-use crate::solver::DaturaPow;
-use super::errors::ClientError;
+use crate::solver::*;
+use super::errors::*;
 use std::time::Instant;
-use super::solver::hash_to_difficulty;
-use tokio::sync::oneshot;
+use tokio::sync::mpsc;
 
 struct ShareInfo {
     pub target: u64,
@@ -21,21 +20,23 @@ pub struct Client {
     last_id: i64,
     worker_id: Option<String>,
     job_list: HashMap<String,ShareInfo>,
+    solver_input: mpsc::Sender<SolverJob>,
+    solver_output: mpsc::Receiver<SolverResult>,
 }
 
-pub type P2poolReply : Result<(),PoolError>;
+pub type P2poolReply = Result<(),PoolError>;
 
 impl Client {
-    pub async fn submit_solution(&mut self, pow: DaturaPow, solution: Vec<u8>) -> Result<Option<oneshot<P2PoolReply>>,ClientError> {
-        if let Some(ShareInfo{target,..}) = &self.job_list.get(&pow.job_id) {
-            if hash_to_difficulty(solution.as_slice()) >= target {
-            //schedule a verification with the solver
 
+    pub async fn submit_solution(&mut self) -> {
+        while let Some(solver_output) = solver_output.recv().await {
+            match solver_output {
+                SolverResult::Valid(data) | SolverResult::Solved(data) => {
         self.last_id += 1;
         let submission = StratumQuery::new(self.last_id,"submit".to_string(), StratumParams::SubmitParams {
             id: self.worker_id.clone().unwrap(),
             job_id: pow.job_id,
-            nonce: pow.nonce.to_string(),
+            nonce: pow.get_nonce(),
             result: hex::encode(&solution),
         });
             let submission_str = serde_json::to_string(&submission)?;
@@ -46,21 +47,16 @@ impl Client {
                     .write_all(format!("{}\n", submission_str).as_bytes())
                     .await?;
 
-                //send back a future while we wait for the response
+                }
+                other => {
+                    panic!("received an invalid solver result for upload {:?}",other);
+                }
+
             }
 
 
-            }
-            else {
-                println!("result target {} is lower than recorded {}, not submitting",pow.target,target);
             }
         }
-        else {
-            return Err(CleintError::UnknownJob);
-        }
-            Ok(false)
-
-
     }
 
     //reimplement as stream with a running loop
@@ -74,7 +70,7 @@ impl Client {
             .await
             {
                 Ok(Ok(0)) => {
-                    Err(ClientError::ServerDisconnected)
+                    Err(PoolError::ServerDisconnected.into())
                 }
                 Ok(Ok(_)) => {
                     if let Ok(ServerReply::WorkOrder { params, .. }) =
@@ -83,14 +79,13 @@ impl Client {
                         self.last_job = Some(params.clone().into());
                         Ok(params.try_into().unwrap())
                     } else {
-                        Err(ClientError::UnknownServerReply(line.clone()))
+                        Err(PoolError::UnknownServerReply(line.clone()).into())
                     }
                 }
                 Ok(Err(e)) => {
-                    Err(ClientError::ReadError(e.to_string()))
+                    Err(ClientError::ReadError(e))
                 }
                 Err(_) => {
-                    println!("No new job received in 5 seconds");
                     Ok(self.last_datura_pow.next().unwrap()) //can't fail
                 }
             }
@@ -99,6 +94,7 @@ impl Client {
         }
     }
     pub async fn new(addr: Option<String>) -> Result<Self, ClientError> {
+        let mut job_list: HashMap::new(),
         if let Some(ip_addr) = addr {
             let mut reader = BufReader::new(
                 TcpStream::connect(ip_addr.clone())
@@ -125,7 +121,7 @@ impl Client {
             };
             let last_datura_pow:DaturaPow = if let Some(job) = &last_job {
                 let pow = job.clone().try_into()?;
-                self.job_list.insert(job.job_id,ShareInfo{ date: Instant::now(),target: pow.target});
+                job_list.insert(job.job_id,ShareInfo{ date: Instant::now(),target: pow.target});
                 pow
             }
             else {
@@ -138,7 +134,7 @@ impl Client {
                 last_datura_pow,
                 last_id : 2,
                 worker_id,
-                job_list: HashMap::new(),
+                job_list,
             });
         }
         Ok(Client {
@@ -148,7 +144,7 @@ impl Client {
             last_datura_pow : DaturaPow::random(None,None), //implement backpressure with higher diff
             last_id : 1,
             worker_id: None,
-            job_list: HashMap::new(),
+            job_list,
         })
     }
 }

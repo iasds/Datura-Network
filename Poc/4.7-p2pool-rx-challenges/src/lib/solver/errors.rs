@@ -1,4 +1,5 @@
 use thiserror::Error;
+use randomx_rs::*;
 use std::num::ParseIntError;
 use std::array::TryFromSliceError;
 use crate::client::ServerReply;
@@ -19,11 +20,11 @@ pub enum SolverError{
     #[error("ran out of possible nonces trying to solve")]
     DaturaPowExhaustedSearchSpace,
     #[error("error with the underlying randomX process")]
-    SolverRandomXError(#[from]randomx_rs::RandomXError),
+    RandomXError(#[from]RandomXError),
     #[error("job timedout")]
-    SolverTimeoutError(String),
+    TimeoutError(String),
     #[error("invalid configuration error")]
-    SolverConfigurationError(String),
+    ConfigurationError(String),
     #[error("worker thread error")]
     WorkerError(#[from]WorkerError),
 

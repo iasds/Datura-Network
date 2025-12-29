@@ -1,3 +1,5 @@
+use randomx_rs::*;
+use super::solver::SolverMode;
 
 ///Calculate hash difficulty from a hash for filtering and routing shares
 pub fn hash_to_difficulty(hash: &[u8; 32]) -> u64 {
@@ -18,7 +20,7 @@ pub fn hash_to_difficulty(hash: &[u8; 32]) -> u64 {
 
     // Numerator = (2^256-1) represented as u64[4] = all ones
     let mut num = [u64::MAX; 4];
-    let mut den = parts;
+    let den = parts;
 
     // manual big integer division: only compute the top 64-bit word of the quotient
     // (classic restoring division adapted to fixed 4-word width)
@@ -49,4 +51,14 @@ pub fn hash_to_difficulty(hash: &[u8; 32]) -> u64 {
     }
 
     quotient_hi
+}
+
+pub fn get_flags(mode: SolverMode) -> RandomXFlag {
+    RandomXFlag::get_recommended_flags() | (
+            if mode == SolverMode::Fast {
+                RandomXFlag::FLAG_LARGE_PAGES | RandomXFlag::FLAG_FULL_MEM
+            }
+            else {
+                RandomXFlag::empty()
+            })
 }

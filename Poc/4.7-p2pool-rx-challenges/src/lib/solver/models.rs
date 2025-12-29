@@ -2,14 +2,17 @@ use crate::consts::*;
 use rand::fill;
 use crate::client::JobData;
 use super::errors::SolverError;
+use std::time::Duration;
 
+#[derive(Debug)]
 pub enum SolverJob {
-    Verify(DaturaPow,Vec<u8>),
+    Verify((DaturaPow,Vec<u8>)),
     Solve((DaturaPow, Duration)),
 }
 
+#[derive(Debug)]
 pub enum SolverResult {
-    Valid(DaturaPow),
+    Valid((DaturaPow,Vec<u8>)),
     Invalid((DaturaPow,SolverError)),
     Solved((DaturaPow,Vec<u8>)),
     Error(SolverError),
@@ -23,9 +26,6 @@ pub struct DaturaPow {
     pub seed_hash: [u8;32],
     pub job_id: String,
     pub target: u64,
-
-    ///if this pow is sent back as a solution then its nonce will be set
-    pub nonce: u16,
 }
 
 impl Iterator for DaturaPow {
@@ -37,7 +37,7 @@ impl Iterator for DaturaPow {
     fn next(&mut self) -> Option<Self::Item> {
         let mut newblob = self.blob;
 
-        let mut client =  u16::wrapping_add(u16::from_le_bytes(newblob[72..74].try_into().unwrap()), 1);
+        let client =  u16::wrapping_add(u16::from_le_bytes(newblob[72..74].try_into().unwrap()), 1);
 
         // Iterate lower 16 bits
 
@@ -51,7 +51,6 @@ impl Iterator for DaturaPow {
             blob: newblob,
             job_id: self.job_id.clone(),
             target: self.target,
-            nonce: 0,
         })
     }
 }
@@ -65,28 +64,17 @@ impl TryFrom<JobData> for DaturaPow {
             blob: hex::decode(work_order.blob)?.as_slice().try_into()?,
             seed_hash: hex::decode(work_order.seed_hash)?.as_slice().try_into()?,
             target: u64::from_str_radix(&work_order.target,16)?,
-            nonce: 0
         })
     }
 }
 
 impl DaturaPow {
-    pub fn next_nonce(&mut self) -> Self {
-        let mut newblob = self.blob;
-        let solver_nonce = u16::wrapping_add(u16::from_le_bytes(newblob[74..].try_into().unwrap()) , 1);
+    pub fn new_nonce(&mut self) {
+        fill(&mut self.blob[NONCE_OFFSET..NONCE_OFFSET + NONCE_SIZE]);
+    }
 
-        newblob[NONCE_OFFSET + NONCE_SIZE / 2..NONCE_OFFSET + NONCE_SIZE].copy_from_slice(&solver_nonce.to_le_bytes());
-
-        self.blob = newblob.clone();
-        self.nonce = solver_nonce;
-
-        DaturaPow {
-            seed_hash: self.seed_hash.clone(),
-            blob: newblob,
-            job_id: self.job_id.clone(),
-            target: self.target,
-            nonce: solver_nonce
-        }
+    pub fn get_nonce(&self) -> String {
+        hex::encode(&self.blob[NONCE_OFFSET..NONCE_OFFSET + NONCE_SIZE])
     }
 
     ///Create new Datura pow from p2pool job data
@@ -96,7 +84,6 @@ impl DaturaPow {
             seed_hash,
             job_id,
             target,
-            nonce: 0,
         }
     }
 
@@ -116,7 +103,6 @@ impl DaturaPow {
             blob,
             seed_hash,
             target: target.unwrap_or(1),
-            nonce: 0,
         }
     }
 }

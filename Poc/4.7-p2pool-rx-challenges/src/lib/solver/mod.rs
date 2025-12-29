@@ -1,9 +1,8 @@
 mod solver;
+mod worker;
 mod models;
 mod errors;
-mod utils;
-mod worker;
-pub use utils::check_hash;
-pub use models::DaturaPow;
+pub mod utils;
+pub use models::*;
 pub use solver::{Solver,SolverMode};
 pub use errors::SolverError;

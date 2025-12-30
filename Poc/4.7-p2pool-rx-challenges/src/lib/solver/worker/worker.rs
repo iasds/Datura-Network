@@ -20,7 +20,7 @@ pub struct Worker {
 
 
 impl Worker {
-    pub fn new(dataset: Option<Arc<RwLock<RandomXDataset>>>,cache: Option<Arc<RwLock<RandomXCache>>>, seed: Arc<RwLock<[u8;32]>>, job_results: mpsc::Sender<SolverResult>, vm: &RandomXVM) -> Result<Self,WorkerError> {
+    pub fn new(dataset: Option<Arc<RwLock<RandomXDataset>>>,cache: Option<Arc<RwLock<RandomXCache>>>, seed: Arc<RwLock<[u8;32]>>, job_results: mpsc::Sender<SolverResult>, _vm: &RandomXVM) -> Result<Self,WorkerError> {
         let (feed_route, worker_thread_receiver) = mpsc::channel(1);
         let mode = if dataset.is_some() {
             SolverMode::Fast

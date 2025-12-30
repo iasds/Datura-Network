@@ -56,7 +56,7 @@ pub fn hash_to_difficulty(hash: &[u8; 32]) -> u64 {
 pub fn get_flags(mode: SolverMode) -> RandomXFlag {
     RandomXFlag::get_recommended_flags() | (
             if mode == SolverMode::Fast {
-                RandomXFlag::FLAG_LARGE_PAGES | RandomXFlag::FLAG_FULL_MEM
+                RandomXFlag::FLAG_LARGE_PAGES | RandomXFlag::FLAG_FULL_MEM|RandomXFlag::FLAG_JIT
             }
             else {
                 RandomXFlag::empty()

@@ -10,6 +10,14 @@ pub enum SolverJob {
     Solve((DaturaPow, Duration)),
 }
 
+impl SolverJob {
+    pub fn get_pow(&self) -> &DaturaPow {
+        match self {
+            Self::Verify((pow,_))|Self::Solve((pow,_)) => &pow,
+        }
+    }
+}
+
 #[derive(Debug)]
 pub enum SolverResult {
     Valid((DaturaPow,Vec<u8>)),

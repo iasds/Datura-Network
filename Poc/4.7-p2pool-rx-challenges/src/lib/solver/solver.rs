@@ -1,14 +1,12 @@
+use rayon::ThreadPool;
 use randomx_rs::*;
 use crate::SolverError;
-use crate::solver::worker::*;
 use tokio::sync::mpsc;
 use crate::consts::*;
 use std::sync::{Arc,RwLock};
 use super::utils::*;
 use std::cmp::min;
 use super::models::*;
-
-
 
 
 ///Solver for challenge completion and verification
@@ -31,7 +29,8 @@ pub struct Solver {
     ///used by the solver when a share can be sent back to the pool
     upstream_pool: mpsc::Sender<SolverResult>,
 
-    workers: ThreadPool,
+    pool: ThreadPool,
+    seed: Arc<RwLock<[u8;32]>>,
 }
 
 #[derive(Copy,Debug,Clone,PartialEq)]
@@ -45,26 +44,59 @@ impl Solver {
     ///verification work
     pub fn new(mode: SolverMode, mut nb_threads: usize, solver_output: mpsc::Sender<SolverResult>, upstream_pool: mpsc::Sender<SolverResult>) -> Result<Self,SolverError> {
         nb_threads = min(nb_threads,num_cpus::get());
-        let flags = get_flags(mode);
-        let cache = RandomXCache::new(flags,&[0u8;32])?; //always at least one worker thread
-        let dataset = if mode==SolverMode::Fast {
-            let locked_cache = cache.read().unwrap();
-            RandomXDataset::new(flags, cache.clone(),0)?
-        }
-        else {
-            None
-        };
+//always at least one worker thread
 
-        //create rayon threadpool here, create 1 vm of the right type depending on the mode
+        let pool = rayon::ThreadPoolBuilder::new().num_threads(nb_threads).build().unwrap();
+
 
         let (solver_input, receiver) = mpsc::channel(SOLVER_CHANNEL_SIZE);
         Ok(Solver {
             mode,
-            solver_input
+            solver_input,
             receiver,
             solver_output,
             upstream_pool,
-            pool: ThreadPool::new
+            pool,
+            seed: Arc::new(RwLock::new([0u8;32])),
         })
+    }
+
+    pub async fn do_work(&mut self){
+        let mut vm = None;
+        let cache = Arc::new(RwLock::new(None));
+        let dataset = Arc::new(RwLock::new(None));
+        self.pool.broadcast(||
+
+               
+        while let Some(solverjob) = self.receiver.recv().await {
+            let pow = solverjob.get_pow();
+            let seed_guard = self.seed.read().unwrap();
+            if pow.seed_hash !=  *seed_guard {
+                drop(seed_guard);
+                let seed_guard = self.seed.write().unwrap();
+                *seed_guard = pow.seed_hash;
+                self.pool.install(|| {
+                    let vm = {
+            let flags = get_flags(self.mode);
+            let cache = RandomXCache::new(flags,&*seed_guard).unwrap(); 
+            if self.mode == SolverMode::Light {
+            RandomXVM::new(flags, Some(cache.clone()), None).unwrap()
+            }
+            else {
+
+            let dataset = RandomXDataset::new(flags, cache,0).unwrap();
+            RandomXVM::new(flags, None, Some(dataset)).unwrap()
+            }
+            };
+                    tx.blocking_send(vm);
+                });
+
+                vm = rx.recv().await;
+                //spawn a dedicated thread and await for a new cache/dataset to update the vm
+            }
+            //install the verify task (only one runner), broadcast the solver jobs
+            if let SolverJob::Verify((pow,solution)) = solverjob {
+            }
+        }
     }
 }

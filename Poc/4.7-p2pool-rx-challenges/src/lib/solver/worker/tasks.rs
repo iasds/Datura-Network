@@ -8,11 +8,34 @@ use crate::SolverError;
 use randomx_rs::*;
 
 
-fn do_work(mut job_receiver: mpsc::Receiver<SolverJob>, result_sender: mpsc::Sender<SolverResult>, vm: &RandomXVM) {
-    let mut worst_job_duration = Duration::from_millis(0);
-    let mut worst_verify_duration = Duration::from_millis(0);
+fn do_work(flags: RandomXFlag,mut job_receiver: mpsc::Receiver<SolverJob>, result_sender: mpsc::Sender<SolverResult>, cache: Arc<RwLock<RandomXCache>>,dataset: Option<Arc<RwLock<RandomXDataset>>>,seed: Arc<RwLock<[u8;32]>>) {
+    let seed_guard = seed.read().unwrap();
+    let mut thread_seed = *seed_guard;
+    drop(seed_guard);
+    let mut vm = None;
     loop {
         while let Some(job) = job_receiver.blocking_recv() {
+            let pow = job.get_pow();
+            update_ro_data(flags, cache, dataset, seed,&pow.seed_hash, &mut thread_seed, &mut vm);
+            let seed_guard = seed.read().unwrap();
+            if pow.seed_hash != *seed_guard {
+                drop(seed_guard);
+                let seed_guard = seed.write().unwrap();
+
+                if pow.seed_hash != *seed_guard {
+                    //no one changed it while we weren't looking
+                    *seed_guard = pow.seed_hash;
+                    let cache_guard = cache.write().unwrap();
+                    *cache_guard = RandomXCache::new(flags, &*seed_guard);
+                    new_dataset_ = if let Some(ds) = dataset {
+                        let dataset_guard = dataset.write().unwrap();
+                        Some(RandomXDataset::new(flags, *cache_guard.clone(),0).unwrap())
+                    }
+                    else {
+                        None
+                    };
+                        
+            }
             let (pow,solution_candidate, time_allotment) = match job {
                 SolverJob::Verify((pow,solution_candidate)) => {
                     let difficulty = hash_to_difficulty(solution_candidate.as_slice().try_into().unwrap());
@@ -36,29 +59,6 @@ fn do_work(mut job_receiver: mpsc::Receiver<SolverJob>, result_sender: mpsc::Sen
 
                 }
             };
-                    let vm = if cache.is_some() {
-                        let cache = cache.unwrap().read().unwrap();
-                        let dataset = dataset.unwrap().read().unwrap();
-                        match RandomXVM::new(flags, Some(*cache), Some(*dataset)) {
-                            Ok(vm) => vm,
-                            Err(some_err) => {
-                            result_sender.blocking_send(SolverResult::Error(SolverError::RandomXError(some_err)));
-                            continue;
-                            }
-                        }
-                    } else if let Some(set) = dataset {
-                        let rl_dataset = set.read().unwrap();
-                        match RandomXVM::new(flags,None,Some(*rl_dataset)) {
-                            Ok(vm) => vm,
-                            Err(some_err) => {
-
-                            result_sender.blocking_send(SolverResult::Error(SolverError::RandomXError(some_err)));
-                            continue;
-                            }
-                        }
-                    } else {
-                        panic!("I have neither cache nor dataset!");
-                    };
 
 
                     let work_start = Instant::now();
@@ -108,9 +108,60 @@ fn do_work(mut job_receiver: mpsc::Receiver<SolverJob>, result_sender: mpsc::Sen
     }
 }
 
+fn update_vm(cache: RandomXCache, dataset: Option<RandomXDataset>, vm: &mut RanomXVM) {
+    if dataset.is_none() {
+                                vm.reinit_cache(cache);
+    }
+    else {
 
-pub fn update_ro_data(dataset: Option<Arc<RwLock<RandomXDataset>>>,cache: Option<Arc<RwLock<RandomXCache>>>,seed: Arc<RwLock<[u8;32]>>, flags: RandomXFlag,job_seed: &[u8;32]) -> Result<(),RandomXError> {
-                    let curseed = seed.read().unwrap();
+                                rxvm.reinit_dataset(dataset),
+    }
+}
+
+
+pub fn update_ro_data(flags: RandomXFlag, cache: Arc<RwLock<RandomXCache>>,dataset: Option<Arc<RwLock<RandomXDataset>>>,seed: Arc<RwLock<[u8;32]>>, job_seed: &[u8;32],thread_seed: &mut [u8;32], vm: &mut Option<RandomXVM>) -> Result<(),RandomXError> {
+            //cases:
+            //global cache and dataset have been updated but not local vm => global seed is OK but
+            //disagrees with thread local seed
+            //
+            //global cache and dataset have not been updated => global seed disagrees with local
+            //seed
+
+                    let seed_guard = seed.read().unwrap();
+                    if job_seed == seed_guard && job_seed != thread_seed {
+                        //case 1
+                        //only need to reinit local vm
+                        *thread_seed = *seed_guard;
+                        drop(seed_guard);
+                        let cache_guard = cache.read().unwrap();
+                        let dataset_guard = if let Some(ds_guard) = dataset {
+                            Some(dataset.read().unwrap().unwrap())
+                        }
+                        else {
+                            None
+                        };
+                        if let Some(ref mut rxvm) = vm {
+                            update_vm(*cache_guard.clone(), dataset_guard, rxvm);
+                        }
+                        else {
+                            if mode == SolverMode::Light {
+                                let cache_guard = cache.read().unwrap();
+                                *vm = Some(RandomXVM::new(flags,Some(cache_guard.clone()),None).unwrap())
+                            }
+                            else {
+                                let dataset_guard = dataset.unwrap().read().unwrap();
+                                *vm = Some(RandomXVM::new(flags,None,Some(*dataset_guard.clone())))
+                            }
+                        };
+                    }
+                    else if job_seed != seed_guard && job_seed == thread_seed {
+                        drop(seed_guard),
+                        let seed_guard = seed.write().unwrap();
+
+                            
+
+                    }
+
                     if *curseed != *job_seed {
                         let mut newseed = seed.write().unwrap();
                         *newseed = *job_seed;
@@ -135,4 +186,3 @@ pub fn update_ro_data(dataset: Option<Arc<RwLock<RandomXDataset>>>,cache: Option
                     Ok(())
 
 }
-

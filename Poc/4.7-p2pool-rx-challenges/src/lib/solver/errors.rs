@@ -17,8 +17,6 @@ pub enum SolverError{
     DaturaPowCreationError(#[from]ParseIntError),
     #[error("challenge response is invalid")]
     DaturaPowInvalidResponse,
-    #[error("ran out of possible nonces trying to solve")]
-    DaturaPowExhaustedSearchSpace,
     #[error("error with the underlying randomX process")]
     RandomXError(#[from]RandomXError),
     #[error("job timedout")]

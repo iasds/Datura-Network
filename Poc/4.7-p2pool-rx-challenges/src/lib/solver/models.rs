@@ -4,7 +4,7 @@ use crate::client::JobData;
 use super::errors::SolverError;
 use std::time::Duration;
 
-#[derive(Debug)]
+#[derive(Debug,Clone)]
 pub enum SolverJob {
     Verify((DaturaPow,Vec<u8>)),
     Solve((DaturaPow, Duration)),

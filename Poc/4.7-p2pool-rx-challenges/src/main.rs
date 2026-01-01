@@ -11,8 +11,8 @@ async fn main() {
     let (upstream_pool_sender, upstream_pool_receiver) = mpsc::channel(1);
     println!("creating a single thread light solver");
     let mut solver = Solver::new(
-        SolverMode::Light,
-        2,
+        SolverMode::Fast,
+        1,
         solver_input_receiver,
         solver_output_sender,
         upstream_pool_sender,
@@ -22,7 +22,9 @@ async fn main() {
 
     println!("creating client for local pow gen");
 
-    let local_client = Client::new(None, upstream_pool_receiver).await.unwrap();
+    let local_client = Client::new(Some("127.0.0.1:3355".to_string()), upstream_pool_receiver)
+        .await
+        .unwrap();
     spawn(Client::start(local_client.clone()));
 
     //get ten jobs as fast as we can solve them

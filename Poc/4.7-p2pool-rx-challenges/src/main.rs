@@ -12,7 +12,7 @@ async fn main() {
     println!("creating a single thread light solver");
     let mut solver = Solver::new(
         SolverMode::Light,
-        1,
+        2,
         solver_input_receiver,
         solver_output_sender,
         upstream_pool_sender,
@@ -26,7 +26,7 @@ async fn main() {
     spawn(Client::start(local_client.clone()));
 
     //get ten jobs as fast as we can solve them
-    for _ in 0..10 {
+    loop {
         let now = Instant::now();
         let job = Client::get_solver_job(local_client.clone()).await;
         println!("main got job {:?}", job);

@@ -23,7 +23,8 @@
         pkgs = nixpkgs.legacyPackages.${system};
       in
       {
-        packages.default =
+        packages = {
+          default =
 
           pkgs.rustPlatform.buildRustPackage
             {
@@ -36,6 +37,15 @@
 
               cargoLock.lockFile = ./Cargo.lock;
             };
+            doc = pkgs.stdenv.mkDerivation {
+              name = "pow-challenge-doc";
+              buildInputs=  with pkgs; [cargo];
+              buildPhase=  ''
+                mkdir $out/doc
+                cd $src
+                cargo doc -o $out/doc'';
+            };
+          };
         devShells = {
           default = pkgs.mkShell {
             buildInputs = [

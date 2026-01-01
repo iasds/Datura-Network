@@ -1,16 +1,35 @@
 use xmr_pow_challenges::{Solver,Client,SolverMode,DaturaPow};
+use tokio::sync::mpsc;
+use tokio::time::{sleep,Duration};
+use tokio::task::spawn;
 
 #[tokio::main]
 async fn main() {
+    let (solver_input_sender, solver_input_receiver) = mpsc::channel(1);
+    let (solver_output_sender, solver_output_receiver) = mpsc::channel(1);
+    let (upstream_pool_sender,upstream_pool_receiver) = mpsc::channel(1);
     println!("creating a single thread light solver");
-    let mut solver = Solver::new(SolverMode::Light,1).unwrap();
-    let mut fast_solver = Solver::new(SolverMode::Fast,1);
-    let mut pow = DaturaPow::random(None,None);
-    println!("created a random pow {:?}",pow);
+    let mut solver = Solver::new(SolverMode::Light,1, solver_input_receiver,solver_output_sender, upstream_pool_sender ).unwrap();
+    spawn(Solver::do_work(solver.clone()));
 
-    println!("submitting a wrong response {:?}",solver.check_answer(&pow));
+    println!("creating client for local pow gen");
 
-    println!("solving challenges for real");
+    let local_client = Client::new(None,solver_output_receiver)
+        .await
+        .unwrap();
+    spawn(Client::start(local_client.clone()));
+
+    for _ in 0..10 {
+        let job = Client::get_solver_job(local_client.clone()).await;
+        println!("got job {:?}",job);
+        println!("sending for solve");
+        solver_input_sender.send(job).await;
+        println!("\n");
+        sleep(Duration::from_secs(1)).await;
+    }
+
+    /*
+    spawn(solver.do_work());
     for i in 1..5 {
         //to avoid spending time rebuiding cache and be more realistic we use the same seedhash
         let mut pow = DaturaPow::random(Some(i), Some([1u8;32]));
@@ -37,7 +56,7 @@ async fn main() {
     }
 
 
-    let mut client = Client::new(Some("127.0.0.1:3355".to_string()))
+    let local_client = Client::new(Some("127.0.0.1:3355".to_string()),solver_output_receiver)
         .await
         .unwrap();
     loop {
@@ -50,4 +69,5 @@ async fn main() {
             other => println!("{:?}",other),
         }
     }
+    */
 }

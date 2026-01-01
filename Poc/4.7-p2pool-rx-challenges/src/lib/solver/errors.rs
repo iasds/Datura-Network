@@ -5,7 +5,7 @@ use std::array::TryFromSliceError;
 use std::num::ParseIntError;
 use thiserror::Error;
 
-#[derive(Error, Debug)]
+#[derive(Error, Debug, Clone)]
 pub enum SolverError {
     #[error("couldn't create daturapow from this server reply")]
     JobCreationError(ServerReply),

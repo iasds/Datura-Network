@@ -1,7 +1,7 @@
 use randomx_rs::RandomXError;
 use thiserror::Error;
 
-#[derive(Error, Debug)]
+#[derive(Error, Debug, Clone)]
 pub enum WorkerError {
     #[error("invalid configuration, cache or dataset required")]
     InvalidConfiguration,

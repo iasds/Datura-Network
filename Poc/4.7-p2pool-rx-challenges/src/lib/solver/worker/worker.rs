@@ -109,6 +109,7 @@ impl WorkerState {
                 }
                 //now let's run again to update our vm state and let others work
                 println!("running again to update vm");
+                drop(seed_guard);
                 self.update(flags, seed.clone(), job_seed, thread_seed, vm);
             }
         }
@@ -149,8 +150,10 @@ impl Worker {
                 &mut self.thread_seed,
                 &mut vm,
             );
+            println!("done updating");
             match job {
                 SolverJob::Verify((pow, solution_candidate, _)) => {
+                    println!("verify job");
                     let difficulty =
                         hash_to_difficulty(solution_candidate.as_slice().try_into().unwrap());
                     if difficulty < pow.target {
@@ -172,6 +175,7 @@ impl Worker {
                     }
                 }
                 SolverJob::Solve((mut pow, end_date)) => {
+                    println!("solve job");
                     let mut best_solution = (Vec::new(), 1u64);
                     while Instant::now() < end_date {
                         pow.new_nonce();
@@ -187,6 +191,7 @@ impl Worker {
                         }
                     }
                     if best_solution.1 >= pow.target {
+                        println!("sending result");
                         self.job_results
                             .blocking_send(SolverResult::Solved((pow, best_solution.0)));
                     }

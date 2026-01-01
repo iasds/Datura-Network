@@ -11,7 +11,7 @@ pub enum SolverJob {
     Solve((DaturaPow, Instant)),
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum SolverResult {
     Valid((DaturaPow, Vec<u8>)),
     Invalid((DaturaPow, SolverError)),

@@ -68,13 +68,13 @@ pub struct JobData {
     pub seed_hash: String,
 }
 
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Debug, Clone)]
 pub struct MinerLoginReply {
     pub id: String,
     pub job: JobData,
 }
 
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Debug, Clone)]
 #[serde(untagged)]
 pub enum ServerReply {
     LoginReply {

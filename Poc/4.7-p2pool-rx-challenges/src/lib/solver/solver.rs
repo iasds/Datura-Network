@@ -141,9 +141,23 @@ impl Solver {
         }))
     }
 
+    pub async fn route_results(this: Arc<Self>) {
+        let mut receiver = this.worker_output_receiver.blocking_write();
+        println!("ready to route results");
+        while let Some(result) = receiver.recv().await {
+            println!("routing output");
+            this.solver_output.send(result.clone());
+            if let SolverResult::Valid(_) = result {
+                println!("sending to pool");
+                this.upstream_pool.send(result.clone()).await;
+            }
+        }
+    }
+
     pub async fn do_work(this: Arc<Self>) {
         let seed = this.seed.clone();
         let mode = this.mode;
+        task::spawn(Self::route_results(this.clone()));
         let initial_state: WorkerState = task::spawn_blocking(move || {
             let seed_guard = seed.blocking_read();
             let cache = Arc::new(SharedCache::new(

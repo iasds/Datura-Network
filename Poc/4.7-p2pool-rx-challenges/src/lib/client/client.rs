@@ -1,11 +1,16 @@
 use super::models::*;
+use std::sync::Arc;
+use rand::fill;
 use std::collections::HashMap;
-use tokio::io::BufReader;
+use tokio::io::{BufReader,AsyncBufReadExt,AsyncWriteExt};
 use tokio::net::TcpStream;
+use tokio::task::spawn;
 use crate::solver::*;
 use super::errors::*;
 use std::time::Instant;
-use tokio::sync::mpsc;
+use tokio::time::{Duration,sleep};
+use tokio::sync::{mpsc,RwLock};
+use crate::consts;
 
 struct ShareInfo {
     pub target: u64,
@@ -13,88 +18,133 @@ struct ShareInfo {
 }
 
 pub struct Client {
-    addr: Option<String>,
-    stream: Option<BufReader<TcpStream>>,
-    last_job: Option<JobData>,
-    last_datura_pow: DaturaPow,
-    last_id: i64,
-    worker_id: Option<String>,
-    job_list: HashMap<String,ShareInfo>,
-    solver_input: mpsc::Sender<SolverJob>,
-    solver_output: mpsc::Receiver<SolverResult>,
+    random_seed : RwLock<([u8;32],Instant)>,
+    stream: Option<RwLock<BufReader<TcpStream>>>,
+    last_datura_pow: RwLock<DaturaPow>,
+    last_id: RwLock<i64>,
+    worker_id: RwLock<String>,
+    job_list: RwLock<HashMap<String,ShareInfo>>,
+    submission_channel: RwLock<mpsc::Receiver<SolverResult>>,
 }
 
 pub type P2poolReply = Result<(),PoolError>;
 
 impl Client {
 
-    pub async fn submit_solution(&mut self) -> {
-        while let Some(solver_output) = solver_output.recv().await {
-            match solver_output {
-                SolverResult::Valid(data) | SolverResult::Solved(data) => {
-        self.last_id += 1;
-        let submission = StratumQuery::new(self.last_id,"submit".to_string(), StratumParams::SubmitParams {
-            id: self.worker_id.clone().unwrap(),
-            job_id: pow.job_id,
-            nonce: pow.get_nonce(),
-            result: hex::encode(&solution),
-        });
-            let submission_str = serde_json::to_string(&submission)?;
 
-            if let Some(reader) = &mut self.stream {
-                reader
-                    .get_mut()
-                    .write_all(format!("{}\n", submission_str).as_bytes())
-                    .await?;
+    pub async fn start(this: Arc<Self>) {
+            let me = this.clone();
+        if this.stream.is_some() {
+            spawn(Self::retrieve_challenges(me));
+        }
+        else {
+            spawn(Self::drop_challenges(me));
+        }
+            let me = this.clone();
+        spawn( Self::maintenance_task(me));
+    }
 
-                }
-                other => {
-                    panic!("received an invalid solver result for upload {:?}",other);
-                }
-
+    pub async fn maintenance_task(this: Arc<Self>) {
+        loop {
+            //remove all expired jobs
+            let mut job_list_guard = this.job_list.write().await;
+            job_list_guard.retain(|_,ShareInfo { date,..}| *date < Instant::now());
+            drop(job_list_guard);
+            let mut r_seed_guard = this.random_seed.write().await;
+            if r_seed_guard.1 < Instant::now() {
+                //time for a new random_seed
+                let mut new_seed = [0u8;32];
+                fill(&mut new_seed);
+                *r_seed_guard = (new_seed, Instant::now() + consts::SEED_LIFETIME);
             }
-
-
-            }
+            drop(r_seed_guard);
+            sleep(consts::POW_MAX_LIFETIME).await;
         }
     }
 
-    //reimplement as stream with a running loop
-    pub async fn get_challenge(&mut self) -> Result<DaturaPow,ClientError> {
-        let mut line = String::new();
-        if let Some(reader) = &mut self.stream {
-            match tokio::time::timeout(
-                std::time::Duration::from_secs(5),
-                reader.read_line(&mut line),
-            )
-            .await
-            {
-                Ok(Ok(0)) => {
-                    Err(PoolError::ServerDisconnected.into())
-                }
-                Ok(Ok(_)) => {
-                    if let Ok(ServerReply::WorkOrder { params, .. }) =
-                        serde_json::from_str::<ServerReply>(&line)
-                    {
-                        self.last_job = Some(params.clone().into());
-                        Ok(params.try_into().unwrap())
-                    } else {
-                        Err(PoolError::UnknownServerReply(line.clone()).into())
+    pub async fn get_solver_job(this: Arc<Self>) -> SolverJob {
+        let job_list = this.job_list.read().await;
+        let last_datura_pow = this.last_datura_pow.read().await;
+        let shareinfo = job_list.get(&last_datura_pow.job_id).unwrap();
+
+        if shareinfo.date < Instant::now() + consts::POW_MAX_LIFETIME {
+            let last_datura_pow = this.last_datura_pow.read().await;
+           SolverJob::Solve((last_datura_pow.clone(),shareinfo.date))
+        }
+        else {
+            drop(job_list);
+            let random_seed = this.random_seed.read().await;
+            let pow = DaturaPow::random(None, random_seed.0.clone());
+            let mut job_list = this.job_list.write().await;
+            let mut last_datura_pow = this.last_datura_pow.write().await;
+
+            job_list.insert(pow.job_id.clone(), ShareInfo{target: pow.target, date: Instant::now()});
+            *last_datura_pow = pow.clone();
+            SolverJob::Solve((pow, Instant::now() + consts::POW_MAX_LIFETIME))
+        }
+    }
+
+    pub async fn retrieve_challenges(this: Arc<Self>) {
+            let mut line = String::new();
+            if let Some( reader) = &this.stream {
+                let mut read_guard = reader.write().await;
+            let mut submission_channel = this.submission_channel.write().await;
+            loop {
+                tokio::select! {
+                    _ = read_guard.read_line(&mut line) => {
+                            if let Ok(ServerReply::WorkOrder { params, .. }) =
+                                serde_json::from_str::<ServerReply>(&line)
+                            {
+                                let pow: DaturaPow = params.clone().try_into().unwrap();
+                                let mut job_list = this.job_list.write().await;
+                                job_list.insert(params.job_id.clone(), ShareInfo { target: pow.target, date: Instant::now() });
+
+                                let mut last_datura_pow = this.last_datura_pow.write().await;
+                                *last_datura_pow = pow;
+                            } 
+                    }
+                    Some(solver_output) = submission_channel.recv() => {
+                                if let SolverResult::Valid((pow,solution))  = solver_output {
+                                    
+                            let mut last_id_guard = this.last_id.write().await;
+                            *last_id_guard += 1;
+                            let worker_id = this.worker_id.read().await;
+                            let submission = StratumQuery::new(*last_id_guard,"submit".to_string(), StratumParams::SubmitParams {
+                                id: worker_id.clone(),
+                                job_id: pow.job_id.clone(),
+                                nonce: pow.get_nonce(),
+                                result: hex::encode(&solution),
+                            });
+                                let submission_str = serde_json::to_string(&submission).unwrap();
+
+                                    read_guard
+                                        .get_mut()
+                                        .write_all(format!("{}\n", submission_str).as_bytes())
+                                        .await.unwrap();
+
+
+
+                                }
+                    }
+
                     }
                 }
-                Ok(Err(e)) => {
-                    Err(ClientError::ReadError(e))
-                }
-                Err(_) => {
-                    Ok(self.last_datura_pow.next().unwrap()) //can't fail
-                }
             }
-        } else {
-            Ok(DaturaPow::random(None,None))
+            }
+
+    pub async fn drop_challenges(this: Arc<Self>) {
+        let mut submission_channel = this.submission_channel.write().await;
+        while let Some(_) = submission_channel.recv().await {
+            sleep(Duration::from_millis(500));
         }
     }
-    pub async fn new(addr: Option<String>) -> Result<Self, ClientError> {
-        let mut job_list: HashMap::new(),
+
+    pub async fn new(addr: Option<String>, submission_channel: mpsc::Receiver<SolverResult>) -> Result<Arc<Self>, ClientError> {
+        let mut job_list = HashMap::new();
+        let mut r_seed = [0u8;32];
+        fill(&mut r_seed);
+
+
         if let Some(ip_addr) = addr {
             let mut reader = BufReader::new(
                 TcpStream::connect(ip_addr.clone())
@@ -112,39 +162,36 @@ impl Client {
                 .await?;
             let mut line = String::new();
             reader.read_line(&mut line).await.unwrap();
-            let (last_job,worker_id): (Option<JobData>,Option<String>) = if let ServerReply::LoginReply { result, .. } =
+            let (last_job,worker_id): (JobData,String) = if let ServerReply::LoginReply { result, .. } =
                 serde_json::from_str(&line).unwrap()
             {
-                (Some(result.job),Some(result.id.clone()))
+                (result.job,result.id.clone())
             } else {
-                (None,None)
+                panic!("login failed");
             };
-            let last_datura_pow:DaturaPow = if let Some(job) = &last_job {
-                let pow = job.clone().try_into()?;
-                job_list.insert(job.job_id,ShareInfo{ date: Instant::now(),target: pow.target});
+            let last_datura_pow:DaturaPow =  {
+                let pow: DaturaPow = last_job.clone().try_into()?;
+                job_list.insert(last_job.job_id.clone(),ShareInfo{ date: Instant::now(),target: pow.target});
                 pow
-            }
-            else {
-                DaturaPow::random(None,None)
             };
-            return Ok(Client {
-                addr: Some(ip_addr.clone()),
-                stream: Some(reader),
-                last_job,
-                last_datura_pow,
-                last_id : 2,
-                worker_id,
-                job_list,
-            });
+            return Ok(Arc::new(Client {
+                random_seed: RwLock::new((r_seed, Instant::now())),
+                stream: Some(RwLock::new(reader)),
+                last_datura_pow: RwLock::new(last_datura_pow),
+                last_id : RwLock::new(2),
+                worker_id: RwLock::new(worker_id),
+                job_list: RwLock::new(job_list),
+                submission_channel: RwLock::new(submission_channel),
+            }));
         }
-        Ok(Client {
-            addr: None,
+        Ok(Arc::new(Client {
+            last_datura_pow: RwLock::new(DaturaPow::random(None,r_seed.clone())),
+            random_seed: RwLock::new((r_seed, Instant::now())),
             stream: None,
-            last_job: None,
-            last_datura_pow : DaturaPow::random(None,None), //implement backpressure with higher diff
-            last_id : 1,
-            worker_id: None,
-            job_list,
-        })
+            last_id : RwLock::new(1),
+            worker_id: RwLock::new(String::new()),
+            job_list: RwLock::new(job_list),
+            submission_channel: RwLock::new(submission_channel),
+        }))
     }
 }

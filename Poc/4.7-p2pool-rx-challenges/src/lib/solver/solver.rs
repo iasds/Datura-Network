@@ -1,21 +1,82 @@
-use rayon::ThreadPool;
 use tokio::task;
+use rayon::ThreadPool;
 use randomx_rs::*;
 use crate::SolverError;
+use crate::solver::worker::{WorkerState,Worker};
 use tokio::sync::mpsc;
 use crate::consts::*;
-use std::sync::{Arc,RwLock};
+use std::sync::{Arc,RwLock,atomic::{Ordering,AtomicBool}};
 use super::utils::*;
 use std::cmp::min;
 use super::models::*;
-use std::time::Instant;
+use tokio::time::{Instant,sleep};
+use std::cell::UnsafeCell;
 
-type WorkPackage = (Option<SolverJob>,time::Instant);
+#[derive(Debug)]
+pub struct SharedDataset {
+    pub dataset: RwLock<UnsafeCell<RandomXDataset>>
+}
 
-pub struct WorkerAllocation {
-    worker: Worker,
+impl SharedDataset {
+    pub fn new(ds: RandomXDataset) -> Self {
+        SharedDataset {
+            dataset: RwLock::new(UnsafeCell::new(ds)),
+        }
+    }
+    pub fn get(&self) -> RandomXDataset {
+        unsafe {
+            let guard = self.dataset.read().unwrap();
+            (*(guard.get())).clone()
+        }
+    }
+}
+
+impl Clone for SharedDataset {
+    fn clone(&self) -> Self {
+        SharedDataset {
+            dataset: RwLock::new(UnsafeCell::new(self.get())),
+        }
+    }
+}
+
+unsafe impl Send for SharedDataset {}
+unsafe impl Sync for SharedDataset {}
+
+#[derive(Debug)]
+pub struct SharedCache {
+    pub cache: RwLock<UnsafeCell<RandomXCache>>,
+}
+
+impl Clone for SharedCache {
+    fn clone(&self) -> Self {
+        SharedCache {
+            cache: RwLock::new(UnsafeCell::new( self.get() )),
+        }
+    }
+
+}
+
+unsafe impl Send for SharedCache {}
+unsafe impl Sync for SharedCache {}
+
+impl SharedCache {
+    pub fn new(cache: RandomXCache) -> Self {
+        SharedCache {
+            cache: RwLock::new(UnsafeCell::new(cache)),
+        }
+    }
+    pub fn get(&self) -> RandomXCache {
+        unsafe {
+            let guard = self.cache.read().unwrap();
+            (*(guard.get())).clone()
+        }
+    }
+
+}
+
+pub struct WorkerChannels {
+    pub worker: Worker,
     pub job_channel: mpsc::Sender<SolverJob>,
-    pub last_job_date: time::Instant,
 }
 
 
@@ -29,10 +90,16 @@ pub struct Solver {
     ///fast mode we use one light worker for verifications (or hashing if it has nothing else to
     ///do) and the others for everything else
     mode: SolverMode,
-    pub solver_input: mpsc::Sender<SolverJob>,
 
-    ///Used by the solver tasks to receive new solverjobs
-    receiver: mpsc::Receiver<SolverJob>,
+
+    ///use by main solver to receive job
+    solver_input: mpsc::Receiver<SolverJob>,
+
+
+    ///used by workers to send back results
+    worker_output_receiver: mpsc::Receiver<SolverResult>,
+    worker_output_sender: mpsc::Sender<SolverResult>,
+
 
     ///Used by the solver to send back results to the outside
     pub solver_output: mpsc::Sender<SolverResult>,
@@ -43,7 +110,7 @@ pub struct Solver {
     pool: ThreadPool,
     seed: Arc<RwLock<[u8;32]>>,
     nb_threads: usize,
-    workers: Vec<WorkerAllocation>,
+    work_allocation: Vec<WorkerChannels>,
 }
 
 
@@ -56,69 +123,94 @@ pub enum SolverMode {
 impl Solver {
     ///If creating with multiple threads one will be a dedicated verification thread and priorize
     ///verification work
-    pub fn new(mode: SolverMode, mut nb_threads: usize, solver_output: mpsc::Sender<SolverResult>, upstream_pool: mpsc::Sender<SolverResult>) -> Result<Self,SolverError> {
+    pub fn new(mode: SolverMode, mut nb_threads: usize, solver_input: mpsc::Receiver<SolverJob>, solver_output: mpsc::Sender<SolverResult>, upstream_pool: mpsc::Sender<SolverResult>) -> Result<Self,SolverError> {
         nb_threads = min(nb_threads,num_cpus::get());
 //always at least one worker thread
 
         let pool = rayon::ThreadPoolBuilder::new().num_threads(nb_threads).build().unwrap();
+        let (worker_output_sender, worker_output_receiver) = mpsc::channel(WORKER_CHANNEL_SIZE);
 
 
-        let (solver_input, receiver) = mpsc::channel(SOLVER_CHANNEL_SIZE);
         Ok(Solver {
             mode,
             nb_threads,
             solver_input,
-            receiver,
+            worker_output_sender,
+            worker_output_receiver,
             solver_output,
             upstream_pool,
             pool,
             seed: Arc::new(RwLock::new([0u8;32])),
-            work_allocation: Vec::new();
+            work_allocation: Vec::new(),
         })
     }
 
-    pub async fn do_work(&mut self){
-        let initial_state = task::spawn_blocking(|| {
+    pub async fn do_work(&'static mut self){
+        let initial_state: WorkerState = task::spawn_blocking(|| {
             let seed_guard = self.seed.read().unwrap();
-            let cache = RandomXCache::new(self.flags, &*seed_guard).unwrap();
+            let cache = Arc::new(
+                    SharedCache::new(RandomXCache::new(get_flags(self.mode), &*seed_guard).unwrap()) 
+                );
             match self.mode {
                 SolverMode::Light => {
                     WorkerState::Light {
-                        cache : Arc::new(RwLock::new(cache)),
-                        vm: None
+                        cache
                     }
                 }
-                SolverMode::Fast {
+                SolverMode::Fast => {
+                    let _cache_guard = cache.cache.read().unwrap();
                     WorkerState::Fast {
-                        dataset : Arc::new(RwLock::new(RandomXDataset::new(self.flags, cache,0).unwrap())),
-                        vm: None,
+                        dataset : Arc::new(
+                                          SharedDataset::new(RandomXDataset::new(get_flags(self.mode), cache.get(),0).unwrap())),
                     }
                 }
             }
-        }).await;
+        }).await.unwrap();
 
         for _ in 0..self.nb_threads {
-            let (job_sender, mut job_receiver) = mpsc::channel(1);
-            let mut worker = Worker::new(flags, initial_state.clone(), self.mode, self.seed.clone(), job_receiver, result_sender);
-            self.pool.install(||worker.start());
-            self.work_allocation.push(WorkAllocation { worker, last_job_date: Instant::now(), job_channel: job_sender});
+            let (job_sender, job_receiver) = mpsc::channel(1);
+            let available = AtomicBool::new(true);
+            let worker = Worker::new(get_flags(self.mode), initial_state.clone(), self.seed.clone(), job_receiver, self.worker_output_sender.clone(), available).unwrap();
+            let mut channels = WorkerChannels { worker, job_channel: job_sender };
+            self.pool.install(||channels.worker.start());
+            self.work_allocation.push(channels);
         }
                
-        while let Some(solverjob) = self.receiver.recv().await {
-            match solverJob {
-                SolverJob::Verify(_) => {
+        while let Some(solverjob) = self.solver_input.recv().await {
+            match solverjob {
+                SolverJob::Verify((_,_,deadline)) => {
                     //verification job, only one thread required
                     //always give work to the worker who has been working the longest (round robin)
-                    self.work_allocation.sort_by_key(|w|w.last_job_date).reverse();
-                    if let Some(work_allocation) = self.work_allocation.first() {
-                        work_allocation.job_channel.send(solverJob.clone()).await;
-                        work_allocation.last_job_date = Instant::now();
+                    while deadline > (Instant::now() + VERIFY_USUAL_DURATION).into() {
+                        self.work_allocation.iter().filter(|w|w.worker.available.load(Ordering::Acquire));
+                        if let Some(work_allocation) = self.work_allocation.first() {
+                            work_allocation.job_channel.send(solverjob.clone()).await;
+                            break;
+                        }
+                        else {
+                            //wait for the longest possible time a verify job can take and try
+                            //again
+                            sleep(VERIFY_USUAL_DURATION).await;
+                        }
                     }
                 }
-                SolverJob::Solve(_) => {
+                SolverJob::Solve((_,deadline)) => {
+                    while deadline > (Instant::now() + VERIFY_USUAL_DURATION).into() {
+                        if self.work_allocation.iter().filter(|w|w.worker.available.load(Ordering::Acquire)).count() != 0 {
+                            //wait for the longest possible time a verify job can take and try
+                            //again
 
+                            for w in self.work_allocation.iter().filter(|w|w.worker.available.load(Ordering::Acquire)) {
+                                w.job_channel.send(solverjob.clone()).await;
+                            }
+                            break;
+                        }
+                        else {
+                            sleep(VERIFY_USUAL_DURATION).await;
+                        }
+                    }
                 }
-
+            }
         }
     }
 }

@@ -2,21 +2,15 @@ use crate::consts::*;
 use rand::fill;
 use crate::client::JobData;
 use super::errors::SolverError;
-use std::time::Duration;
+use std::time::Instant;
 
+///Instant is the deadline
 #[derive(Debug,Clone)]
 pub enum SolverJob {
-    Verify((DaturaPow,Vec<u8>)),
-    Solve((DaturaPow, Duration)),
+    Verify((DaturaPow,Vec<u8>, Instant)),
+    Solve((DaturaPow, Instant)),
 }
 
-impl SolverJob {
-    pub fn get_pow(&self) -> &DaturaPow {
-        match self {
-            Self::Verify((pow,_))|Self::Solve((pow,_)) => &pow,
-        }
-    }
-}
 
 #[derive(Debug)]
 pub enum SolverResult {
@@ -34,33 +28,6 @@ pub struct DaturaPow {
     pub seed_hash: [u8;32],
     pub job_id: String,
     pub target: u64,
-}
-
-impl Iterator for DaturaPow {
-    type Item = DaturaPow;
-
-    ///Iterate over the possible DaturaPows, we are emitting jobs as if we were a pool
-    ///so we are using the first 16 bit of our 32 bit nonce per client and send a 0 lower 16
-    ///bits for the client to iterate over
-    fn next(&mut self) -> Option<Self::Item> {
-        let mut newblob = self.blob;
-
-        let client =  u16::wrapping_add(u16::from_le_bytes(newblob[72..74].try_into().unwrap()), 1);
-
-        // Iterate lower 16 bits
-
-        newblob[72..74].copy_from_slice(&client.to_le_bytes());
-        newblob[74..].copy_from_slice(&[0u8;2]);
-        self.blob = newblob.clone();
-        
-        
-        Some(DaturaPow {
-            seed_hash: self.seed_hash.clone(),
-            blob: newblob,
-            job_id: self.job_id.clone(),
-            target: self.target,
-        })
-    }
 }
 
 impl TryFrom<JobData> for DaturaPow {
@@ -96,21 +63,19 @@ impl DaturaPow {
     }
 
         ///generate really random challenge
-    pub fn random(target: Option<u64>, seed: Option<[u8;32]>) -> Self {
+    pub fn random(target: Option<u64>, seed_hash: [u8;32]) -> Self {
         
         let mut blob = [0u8;76];
-        let mut seed_hash = seed.unwrap_or([0u8;32]);
+        let mut job_id = [0u8;32];
 
         fill(&mut blob);
+        fill(&mut job_id);
 
-        if seed.is_none(){
-            fill(&mut seed_hash);
-        }
         DaturaPow {
-            job_id: "0".to_string(),
+            job_id: hex::encode(&job_id),
             blob,
             seed_hash,
-            target: target.unwrap_or(1),
+            target: target.unwrap_or(MINIMAL_DIFFICULTY),
         }
     }
 }

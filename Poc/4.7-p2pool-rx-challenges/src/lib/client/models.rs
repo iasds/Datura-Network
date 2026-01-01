@@ -8,17 +8,17 @@ use serde::{Deserialize, Serialize};
 pub enum StratumParams {
     ///Login variant: all those strings can be empty
     LoginParams {
-    login: String,
-    pass: String,
-    agent: String,
-},
+        login: String,
+        pass: String,
+        agent: String,
+    },
     ///job submission params for converting back daturapows to p2pool shares
     SubmitParams {
         id: String,
         job_id: String,
         nonce: String,
         result: String,
-    }
+    },
 }
 
 impl StratumParams {
@@ -33,15 +33,15 @@ impl StratumParams {
 
 #[derive(serde::Serialize, Deserialize)]
 pub struct StratumQuery {
-        id: i64,
-        jsonrpc: String,
-        method: String,
-        params: StratumParams,
-    }
+    id: i64,
+    jsonrpc: String,
+    method: String,
+    params: StratumParams,
+}
 
 impl StratumQuery {
     pub fn new(id: i64, method: String, params: StratumParams) -> Self {
-        StratumQuery{
+        StratumQuery {
             id,
             method,
             jsonrpc: "2.0".to_string(),
@@ -49,7 +49,6 @@ impl StratumQuery {
         }
     }
 }
-
 
 #[derive(Deserialize, Debug)]
 pub struct Job {
@@ -70,7 +69,7 @@ pub struct JobData {
 }
 
 #[derive(Deserialize, Debug)]
-pub struct MinerLoginReply{
+pub struct MinerLoginReply {
     pub id: String,
     pub job: JobData,
 }

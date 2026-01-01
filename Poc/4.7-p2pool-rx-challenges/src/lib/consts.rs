@@ -6,7 +6,6 @@ pub const SOLVER_CHANNEL_SIZE: usize = 64;
 pub const WORKER_CHANNEL_SIZE: usize = 16;
 pub const VERIFY_USUAL_DURATION: Duration = Duration::from_millis(50);
 
-
 /// pow max lifetime, for random pows they will have an expiration between 0 and this lifetime
 /// client job list is also cleaned up based on this lifetime
 pub const POW_MAX_LIFETIME: Duration = Duration::from_secs(5);

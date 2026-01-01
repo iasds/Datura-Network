@@ -1,27 +1,32 @@
-use xmr_pow_challenges::{Solver,Client,SolverMode,DaturaPow};
 use tokio::sync::mpsc;
-use tokio::time::{sleep,Duration};
 use tokio::task::spawn;
+use tokio::time::{Duration, sleep};
+use xmr_pow_challenges::{Client, DaturaPow, Solver, SolverMode};
 
 #[tokio::main]
 async fn main() {
     let (solver_input_sender, solver_input_receiver) = mpsc::channel(1);
     let (solver_output_sender, solver_output_receiver) = mpsc::channel(1);
-    let (upstream_pool_sender,upstream_pool_receiver) = mpsc::channel(1);
+    let (upstream_pool_sender, upstream_pool_receiver) = mpsc::channel(1);
     println!("creating a single thread light solver");
-    let mut solver = Solver::new(SolverMode::Light,1, solver_input_receiver,solver_output_sender, upstream_pool_sender ).unwrap();
+    let mut solver = Solver::new(
+        SolverMode::Light,
+        1,
+        solver_input_receiver,
+        solver_output_sender,
+        upstream_pool_sender,
+    )
+    .unwrap();
     spawn(Solver::do_work(solver.clone()));
 
     println!("creating client for local pow gen");
 
-    let local_client = Client::new(None,solver_output_receiver)
-        .await
-        .unwrap();
+    let local_client = Client::new(None, solver_output_receiver).await.unwrap();
     spawn(Client::start(local_client.clone()));
 
     for _ in 0..10 {
         let job = Client::get_solver_job(local_client.clone()).await;
-        println!("got job {:?}",job);
+        println!("got job {:?}", job);
         println!("sending for solve");
         solver_input_sender.send(job).await;
         println!("\n");

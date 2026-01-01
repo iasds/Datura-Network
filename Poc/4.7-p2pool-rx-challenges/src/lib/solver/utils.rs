@@ -1,11 +1,11 @@
-use randomx_rs::*;
 use super::solver::SolverMode;
+use randomx_rs::*;
 
 ///Calculate hash difficulty from a hash for filtering and routing shares
 pub fn hash_to_difficulty(hash: &[u8; 32]) -> u64 {
     let mut parts = [0u64; 4];
     for i in 0..4 {
-        parts[i] = u64::from_be_bytes(hash[i*8..i*8+8].try_into().unwrap());
+        parts[i] = u64::from_be_bytes(hash[i * 8..i * 8 + 8].try_into().unwrap());
     }
 
     // special case: all zero hash => infinite difficulty, clamp to u64::MAX
@@ -54,11 +54,10 @@ pub fn hash_to_difficulty(hash: &[u8; 32]) -> u64 {
 }
 
 pub fn get_flags(mode: SolverMode) -> RandomXFlag {
-    RandomXFlag::get_recommended_flags() | (
-            if mode == SolverMode::Fast {
-                RandomXFlag::FLAG_LARGE_PAGES | RandomXFlag::FLAG_FULL_MEM|RandomXFlag::FLAG_JIT
-            }
-            else {
-                RandomXFlag::empty()
-            })
+    RandomXFlag::get_recommended_flags()
+        | (if mode == SolverMode::Fast {
+            RandomXFlag::FLAG_LARGE_PAGES | RandomXFlag::FLAG_FULL_MEM | RandomXFlag::FLAG_JIT
+        } else {
+            RandomXFlag::empty()
+        })
 }

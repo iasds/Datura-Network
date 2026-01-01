@@ -142,11 +142,11 @@ impl Solver {
     }
 
     pub async fn route_results(this: Arc<Self>) {
-        let mut receiver = this.worker_output_receiver.blocking_write();
+        let mut receiver = this.worker_output_receiver.write().await;
         println!("ready to route results");
         while let Some(result) = receiver.recv().await {
             println!("routing output");
-            this.solver_output.send(result.clone());
+            this.solver_output.send(result.clone()).await;
             if let SolverResult::Valid(_) = result {
                 println!("sending to pool");
                 this.upstream_pool.send(result.clone()).await;

@@ -1,7 +1,8 @@
+use std::ops::Add;
 use tokio::sync::mpsc;
 use tokio::task::spawn;
-use tokio::time::{Duration, sleep};
-use xmr_pow_challenges::{Client, DaturaPow, Solver, SolverMode};
+use tokio::time::{Duration, Instant, sleep};
+use xmr_pow_challenges::{Client, DaturaPow, Solver, SolverJob, SolverMode, SolverResult};
 
 #[tokio::main]
 async fn main() {
@@ -24,15 +25,32 @@ async fn main() {
     let local_client = Client::new(None, upstream_pool_receiver).await.unwrap();
     spawn(Client::start(local_client.clone()));
 
+    //get ten jobs as fast as we can solve them
     for _ in 0..10 {
+        let now = Instant::now();
         let job = Client::get_solver_job(local_client.clone()).await;
-        println!("got job {:?}", job);
+        println!("main got job {:?}", job);
         println!("sending for solve");
         solver_input_sender.send(job).await;
-        let result = solver_output_receiver.recv().await.unwrap();
-        println!("got result: {:?}", result);
+        println!("now awaiting result");
+        if let SolverResult::Solved((pow, solution)) = solver_output_receiver.recv().await.unwrap()
+        {
+            println!("checking solution");
+            solver_input_sender
+                .send(SolverJob::Verify((
+                    pow,
+                    solution,
+                    Instant::now().add(Duration::from_secs(5)).into(),
+                )))
+                .await;
+        }
+        println!(
+            "got result {:?}",
+            solver_output_receiver.recv().await.unwrap()
+        );
+
+        println!("full elapsed time: {:2?}", now.elapsed());
         println!("\n");
-        sleep(Duration::from_secs(1)).await;
     }
 
     /*

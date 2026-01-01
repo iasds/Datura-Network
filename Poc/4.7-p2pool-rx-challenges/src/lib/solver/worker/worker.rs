@@ -169,6 +169,9 @@ impl Worker {
                             self.job_results.blocking_send(SolverResult::Error(
                                 SolverError::DaturaPowInvalidResponse,
                             ));
+                        } else {
+                            self.job_results
+                                .blocking_send(SolverResult::Valid((pow, solution)));
                         }
                     } else {
                         panic!("no vm to run!");
@@ -176,24 +179,24 @@ impl Worker {
                 }
                 SolverJob::Solve((mut pow, end_date)) => {
                     println!("solve job");
-                    let mut best_solution = (Vec::new(), 1u64);
+                    let mut best_solution = (DaturaPow::random(None, [0u8; 32]), Vec::new(), 1u64);
                     while Instant::now() < end_date {
                         pow.new_nonce();
-                        let solution = if let Some(ref rxvm) = vm {
+                        let result = if let Some(ref rxvm) = vm {
                             rxvm.calculate_hash(&pow.blob).unwrap()
                         } else {
                             panic!("no vm to run!");
                         };
-                        let difficulty =
-                            hash_to_difficulty(solution.as_slice().try_into().unwrap());
-                        if difficulty > pow.target && difficulty > best_solution.1 {
-                            best_solution = (solution, difficulty);
+                        let difficulty = hash_to_difficulty(result.as_slice().try_into().unwrap());
+                        if difficulty > pow.target && difficulty > best_solution.2 {
+                            best_solution = (pow.clone(), result.clone(), difficulty);
                         }
                     }
-                    if best_solution.1 >= pow.target {
-                        println!("sending result");
-                        self.job_results
-                            .blocking_send(SolverResult::Solved((pow, best_solution.0)));
+                    if best_solution.2 >= pow.target {
+                        self.job_results.blocking_send(SolverResult::Solved((
+                            best_solution.0,
+                            best_solution.1,
+                        )));
                     }
                 }
             }

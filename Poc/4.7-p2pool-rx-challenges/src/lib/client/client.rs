@@ -67,7 +67,13 @@ impl Client {
         let mut last_datura_pow = this.last_datura_pow.write().await;
         let random_seed = this.random_seed.read().await;
 
-        let shareinfo = job_list.get(&last_datura_pow.job_id).unwrap();
+        let shareinfo = match job_list.get(&last_datura_pow.job_id) {
+            Some(si) => si,
+            None => &ShareInfo {
+                target: 1,
+                date: Instant::now(),
+            },
+        };
 
         if shareinfo.date > Instant::now() {
             println!("reusing last pow");

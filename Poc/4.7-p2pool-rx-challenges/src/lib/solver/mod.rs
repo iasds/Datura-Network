@@ -5,4 +5,4 @@ pub mod utils;
 mod worker;
 pub use errors::SolverError;
 pub use models::*;
-pub use solver::{Solver, SolverMode};
+pub use solver::*;

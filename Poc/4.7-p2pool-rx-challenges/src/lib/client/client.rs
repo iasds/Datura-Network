@@ -1,4 +1,5 @@
 use super::models::*;
+use std::ops::Add;
 use std::sync::Arc;
 use rand::fill;
 use std::collections::HashMap;
@@ -12,6 +13,7 @@ use tokio::time::{Duration,sleep};
 use tokio::sync::{mpsc,RwLock};
 use crate::consts;
 
+#[derive(Debug)]
 struct ShareInfo {
     pub target: u64,
     pub date: Instant,
@@ -47,15 +49,16 @@ impl Client {
     pub async fn maintenance_task(this: Arc<Self>) {
         loop {
             //remove all expired jobs
+
             let mut job_list_guard = this.job_list.write().await;
-            job_list_guard.retain(|_,ShareInfo { date,..}| *date < Instant::now());
+            job_list_guard.retain(|_,ShareInfo { date,..}| *date > Instant::now());
             drop(job_list_guard);
             let mut r_seed_guard = this.random_seed.write().await;
             if r_seed_guard.1 < Instant::now() {
                 //time for a new random_seed
                 let mut new_seed = [0u8;32];
                 fill(&mut new_seed);
-                *r_seed_guard = (new_seed, Instant::now() + consts::SEED_LIFETIME);
+                *r_seed_guard = (new_seed, Instant::now().add(consts::SEED_LIFETIME));
             }
             drop(r_seed_guard);
             sleep(consts::POW_MAX_LIFETIME).await;
@@ -63,24 +66,24 @@ impl Client {
     }
 
     pub async fn get_solver_job(this: Arc<Self>) -> SolverJob {
-        let job_list = this.job_list.read().await;
-        let last_datura_pow = this.last_datura_pow.read().await;
+        let mut job_list = this.job_list.write().await;
+        let mut last_datura_pow = this.last_datura_pow.write().await;
+        let random_seed = this.random_seed.read().await;
+
         let shareinfo = job_list.get(&last_datura_pow.job_id).unwrap();
 
-        if shareinfo.date < Instant::now() + consts::POW_MAX_LIFETIME {
+        if shareinfo.date > Instant::now() {
+            println!("reusing last pow");
             let last_datura_pow = this.last_datura_pow.read().await;
            SolverJob::Solve((last_datura_pow.clone(),shareinfo.date))
         }
         else {
-            drop(job_list);
-            let random_seed = this.random_seed.read().await;
+            println!("creating new pow");
             let pow = DaturaPow::random(None, random_seed.0.clone());
-            let mut job_list = this.job_list.write().await;
-            let mut last_datura_pow = this.last_datura_pow.write().await;
-
-            job_list.insert(pow.job_id.clone(), ShareInfo{target: pow.target, date: Instant::now()});
+            let expiration_date = Instant::now().add(consts::POW_MAX_LIFETIME);
+            job_list.insert(pow.job_id.clone(), ShareInfo{target: pow.target, date: expiration_date});
             *last_datura_pow = pow.clone();
-            SolverJob::Solve((pow, Instant::now() + consts::POW_MAX_LIFETIME))
+            SolverJob::Solve((pow, expiration_date))
         }
     }
 
@@ -92,6 +95,7 @@ impl Client {
             loop {
                 tokio::select! {
                     _ = read_guard.read_line(&mut line) => {
+                            println!("got new challenge from server: {}",line);
                             if let Ok(ServerReply::WorkOrder { params, .. }) =
                                 serde_json::from_str::<ServerReply>(&line)
                             {
@@ -104,6 +108,7 @@ impl Client {
                             } 
                     }
                     Some(solver_output) = submission_channel.recv() => {
+                                println!("got new output submission: {:?}",solver_output);
                                 if let SolverResult::Valid((pow,solution))  = solver_output {
                                     
                             let mut last_id_guard = this.last_id.write().await;
@@ -135,6 +140,7 @@ impl Client {
     pub async fn drop_challenges(this: Arc<Self>) {
         let mut submission_channel = this.submission_channel.write().await;
         while let Some(_) = submission_channel.recv().await {
+            println!("running in local mode, dropping solution");
             sleep(Duration::from_millis(500));
         }
     }
@@ -175,7 +181,7 @@ impl Client {
                 pow
             };
             return Ok(Arc::new(Client {
-                random_seed: RwLock::new((r_seed, Instant::now())),
+                random_seed: RwLock::new((r_seed, Instant::now().add(consts::SEED_LIFETIME))),
                 stream: Some(RwLock::new(reader)),
                 last_datura_pow: RwLock::new(last_datura_pow),
                 last_id : RwLock::new(2),
@@ -184,9 +190,11 @@ impl Client {
                 submission_channel: RwLock::new(submission_channel),
             }));
         }
+        let pow = DaturaPow::random(None,r_seed.clone());
+        job_list.insert(pow.job_id.clone(),ShareInfo { date: Instant::now(), target: pow.target});
         Ok(Arc::new(Client {
-            last_datura_pow: RwLock::new(DaturaPow::random(None,r_seed.clone())),
-            random_seed: RwLock::new((r_seed, Instant::now())),
+            last_datura_pow: RwLock::new(pow),
+            random_seed: RwLock::new((r_seed, Instant::now().add(consts::SEED_LIFETIME))),
             stream: None,
             last_id : RwLock::new(1),
             worker_id: RwLock::new(String::new()),

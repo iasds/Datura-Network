@@ -1,7 +1,8 @@
 use crate::solver::SolverJob;
 use std::cell::UnsafeCell;
 use std::time::Instant;
-use std::sync::{Arc,RwLock, atomic::{AtomicBool, Ordering}};
+use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
+use tokio::sync::RwLock;
 use tokio::sync::mpsc;
 use randomx_rs::*;
 use super::*;
@@ -16,7 +17,7 @@ pub struct Worker {
     job_results: mpsc::Sender<SolverResult>,
     seed: Arc<RwLock<[u8;32]>>,
     thread_seed: [u8;32],
-    pub available: AtomicBool,
+    pub available: Arc<AtomicBool>,
 }
     pub fn get_pow(job: &SolverJob) -> &DaturaPow {
         match job {
@@ -37,7 +38,9 @@ pub enum WorkerState {
 
 impl WorkerState {
     pub fn update(&mut self,flags: RandomXFlag,seed: Arc<RwLock<[u8;32]>>,job_seed: &[u8;32], thread_seed: &mut [u8;32], vm: &mut Option<RandomXVM>) {
-        let seed_guard = seed.read().unwrap();
+        println!("workerstate: updating state");
+        let mut seed_guard = seed.blocking_write();
+        println!("got seed");
             //cases:
             //global cache and dataset have been updated but not local vm => global seed is OK but
             //disagrees with thread local seed
@@ -48,36 +51,38 @@ impl WorkerState {
                     if *job_seed == *seed_guard && job_seed != thread_seed {
                         //case 1
                         //only need to reinit local vm
+                        println!("workerstate: reinit local vm");
                         *thread_seed = *seed_guard;
-                        drop(seed_guard);
                         match self {
                             WorkerState::Light {cache} => {
-                                let _cache_guard = cache.cache.read().unwrap();
+                                let _cache_guard = cache.cache.blocking_read();
                                 match vm {
                                     Some(rxvm) => {
+                                        println!("workerstate: reinit cache");
                                         rxvm.reinit_cache(cache.get()).unwrap();
                                     }
                                     None => {
+                                        println!("new light vm");
                                         *vm = Some(RandomXVM::new(flags, Some(cache.get()),None).unwrap());
                                     }
                                 }
                             }
                             WorkerState::Fast { dataset} => {
-                                let _ds_guard = dataset.dataset.read().unwrap();
+                                let _ds_guard = dataset.dataset.blocking_read();
                                 match vm {
                                     Some(rxvm) => {
                                         rxvm.reinit_dataset(dataset.get()).unwrap();
                                     }
                                     None => {
+                                        println!("new fast vm");
                                         *vm = Some(RandomXVM::new(flags,None, Some(dataset.get())).unwrap());
                                     }
                                 }
                             }
                         }
                     }
-                    else if *job_seed != *seed_guard && job_seed == thread_seed {
-                        drop(seed_guard);
-                        let mut seed_guard = seed.write().unwrap();
+                    else if *job_seed != *seed_guard {
+                        println!("seed update");
                         if *seed_guard == *job_seed {
                             //someone already finished updating the cache and dataset
                             //while we were waiting on seed guard
@@ -88,16 +93,19 @@ impl WorkerState {
                             *seed_guard = *job_seed;
                             match self {
                                 WorkerState::Light {cache,..} => {
-                                    let mut cache_guard = cache.cache.write().unwrap();
+                                    println!("rebuilding cache");
+                                    let mut cache_guard = cache.cache.blocking_write();
                                     *cache_guard = UnsafeCell::new(RandomXCache::new(flags, job_seed).unwrap());
                                 }
                                 WorkerState::Fast {dataset,..} => {
+                                    println!("rebuilding dataset");
                                     let cache = RandomXCache::new(flags, job_seed).unwrap();
-                                    let mut ds_guard = dataset.dataset.write().unwrap();
+                                    let mut ds_guard = dataset.dataset.blocking_write();
                                     *ds_guard = UnsafeCell::new(RandomXDataset::new(flags, cache,0).unwrap());
                                 }
                             }
                             //now let's run again to update our vm state and let others work
+                            println!("running again to update vm");
                             self.update(flags, seed.clone(), job_seed, thread_seed,vm);
                         }
                     }
@@ -107,7 +115,7 @@ impl WorkerState {
 
 
 impl Worker {
-    pub fn new(flags: RandomXFlag, state: WorkerState,  seed: Arc<RwLock<[u8;32]>>, job_channel: mpsc::Receiver<SolverJob>, job_results: mpsc::Sender<SolverResult>, available: AtomicBool) -> Result<Self,WorkerError> {
+    pub fn new(flags: RandomXFlag, state: WorkerState,  seed: Arc<RwLock<[u8;32]>>, job_channel: mpsc::Receiver<SolverJob>, job_results: mpsc::Sender<SolverResult>, available: Arc<AtomicBool>) -> Result<Self,WorkerError> {
         Ok(Worker {
             flags,
             state,
@@ -120,8 +128,10 @@ impl Worker {
     }
 
     pub fn start(&mut self) {
+        println!("starting worker");
         let mut vm = None;
         while let Some(job) = self.job_channel.blocking_recv() {
+            println!("got worker job {:?}",job);
             self.available.store(false, Ordering::Release);
             let pow = get_pow(&job);
             self.state.update(self.flags, self.seed.clone(), &pow.seed_hash, &mut self.thread_seed, &mut vm);

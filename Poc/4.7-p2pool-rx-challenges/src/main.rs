@@ -6,7 +6,7 @@ use xmr_pow_challenges::{Client, DaturaPow, Solver, SolverMode};
 #[tokio::main]
 async fn main() {
     let (solver_input_sender, solver_input_receiver) = mpsc::channel(1);
-    let (solver_output_sender, solver_output_receiver) = mpsc::channel(1);
+    let (solver_output_sender, mut solver_output_receiver) = mpsc::channel(1);
     let (upstream_pool_sender, upstream_pool_receiver) = mpsc::channel(1);
     println!("creating a single thread light solver");
     let mut solver = Solver::new(
@@ -21,7 +21,7 @@ async fn main() {
 
     println!("creating client for local pow gen");
 
-    let local_client = Client::new(None, solver_output_receiver).await.unwrap();
+    let local_client = Client::new(None, upstream_pool_receiver).await.unwrap();
     spawn(Client::start(local_client.clone()));
 
     for _ in 0..10 {
@@ -29,6 +29,8 @@ async fn main() {
         println!("got job {:?}", job);
         println!("sending for solve");
         solver_input_sender.send(job).await;
+        let result = solver_output_receiver.recv().await.unwrap();
+        println!("got result: {:?}", result);
         println!("\n");
         sleep(Duration::from_secs(1)).await;
     }

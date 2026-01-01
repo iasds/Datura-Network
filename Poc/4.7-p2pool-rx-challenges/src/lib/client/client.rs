@@ -2,6 +2,7 @@ use super::errors::*;
 use super::models::*;
 use crate::consts;
 use crate::solver::*;
+use crate::utils::hash_to_difficulty;
 use rand::fill;
 use std::collections::HashMap;
 use std::ops::Add;
@@ -103,44 +104,56 @@ impl Client {
             loop {
                 tokio::select! {
                 _ = read_guard.read_line(&mut line) => {
-                        println!("got new challenge from server: {}",line);
                         if let Ok(ServerReply::WorkOrder { params, .. }) =
                             serde_json::from_str::<ServerReply>(&line)
                         {
                             let pow: DaturaPow = params.clone().try_into().unwrap();
                             let mut job_list = this.job_list.write().await;
-                            job_list.insert(params.job_id.clone(), ShareInfo { target: pow.target, date: Instant::now() });
+                            job_list.insert(params.job_id.clone(), ShareInfo { target:pow.target, date: Instant::now() });
 
                             let mut last_datura_pow = this.last_datura_pow.write().await;
                             *last_datura_pow = pow;
                         }
+                        else {
+                            println!("receivedd {}",line);
+                        }
                 }
                 Some(solver_output) = submission_channel.recv() => {
                             println!("got new output submission: {:?}",solver_output);
-                            if let SolverResult::Valid((pow,solution))  = solver_output {
+                            let job_list = this.job_list.read().await;
 
-                        let mut last_id_guard = this.last_id.write().await;
-                        *last_id_guard += 1;
-                        let worker_id = this.worker_id.read().await;
-                        let submission = StratumQuery::new(*last_id_guard,"submit".to_string(), StratumParams::SubmitParams {
-                            id: worker_id.clone(),
-                            job_id: pow.job_id.clone(),
-                            nonce: pow.get_nonce(),
-                            result: hex::encode(&solution),
-                        });
-                            let submission_str = serde_json::to_string(&submission).unwrap();
+                                if let SolverResult::Valid((pow,solution))  = solver_output {
 
-                                read_guard
-                                    .get_mut()
-                                    .write_all(format!("{}\n", submission_str).as_bytes())
-                                    .await.unwrap();
+                            if let Some(ShareInfo{target,..}) = job_list.get(&pow.job_id) {
+                                    let difficulty = hash_to_difficulty(solution.as_slice().try_into().unwrap());
+                                    if difficulty >= *target {
+                                        println!("result difficulty: {}, target diff: {}",difficulty, target);
+                                        let mut last_id_guard = this.last_id.write().await;
+                                        *last_id_guard += 1;
+                                        let worker_id = this.worker_id.read().await;
+                                        let submission = StratumQuery::new(*last_id_guard,"submit".to_string(), StratumParams::SubmitParams {
+                                            id: worker_id.clone(),
+                                            job_id: pow.job_id.clone(),
+                                            nonce: pow.get_nonce(),
+                                            result: hex::encode(&solution),
+                                        });
+                                            let submission_str = serde_json::to_string(&submission).unwrap();
 
-
+                                                read_guard
+                                                    .get_mut()
+                                                    .write_all(format!("{}\n", submission_str).as_bytes())
+                                                    .await.unwrap();
+                                    }
+                                    else {
+                                        println!("result diff is too low: {} for {}", difficulty, target);
+                                    }
+                                }
 
                             }
                 }
 
                 }
+                line.clear();
             }
         }
     }

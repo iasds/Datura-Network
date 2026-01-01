@@ -32,10 +32,6 @@ pub struct DaturaPow {
 impl TryFrom<JobData> for DaturaPow {
     type Error = SolverError;
     fn try_from(work_order: JobData) -> Result<Self, SolverError> {
-        println!(
-            "creating daturapow from blob {} and seedhash {}",
-            &work_order.blob, &work_order.seed_hash
-        );
         Ok(DaturaPow {
             job_id: work_order.job_id,
             blob: hex::decode(work_order.blob)?.as_slice().try_into()?,

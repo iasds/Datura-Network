@@ -8,7 +8,7 @@ pub const VERIFY_USUAL_DURATION: Duration = Duration::from_millis(50);
 
 /// pow max lifetime, for random pows they will have an expiration between 0 and this lifetime
 /// client job list is also cleaned up based on this lifetime
-pub const POW_MAX_LIFETIME: Duration = Duration::from_secs(5);
+pub const POW_MAX_LIFETIME: Duration = Duration::from_secs(3);
 
 /// random seed_hash max lifetime when used for genrating new pows
 pub const SEED_LIFETIME: Duration = Duration::from_hours(48);

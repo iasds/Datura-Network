@@ -143,9 +143,7 @@ impl Solver {
 
     pub async fn route_results(this: Arc<Self>) {
         let mut receiver = this.worker_output_receiver.write().await;
-        println!("ready to route results");
         while let Some(result) = receiver.recv().await {
-            println!("routing output");
             this.solver_output.send(result.clone()).await;
             if let SolverResult::Valid(_) = result {
                 println!("sending to pool");
@@ -201,7 +199,6 @@ impl Solver {
         let mut solver_input = this.solver_input.write().await;
 
         while let Some(solverjob) = solver_input.recv().await {
-            println!("solver: got job: {:?}", solverjob);
             match solverjob {
                 SolverJob::Verify((_, _, deadline)) => {
                     //verification job, only one thread required
@@ -211,7 +208,6 @@ impl Solver {
                             .iter()
                             .filter(|w| w.available.load(Ordering::Acquire));
                         if let Some(work_allocation) = w_chans.first() {
-                            println!("sending verification");
                             work_allocation.job_channel.send(solverjob.clone()).await;
                             break;
                         } else {
@@ -236,7 +232,6 @@ impl Solver {
                                 .iter()
                                 .filter(|w| w.available.load(Ordering::Acquire))
                             {
-                                println!("sending solve job");
                                 w.job_channel.send(solverjob.clone()).await;
                             }
                             break;

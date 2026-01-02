@@ -11,6 +11,16 @@ pub enum SolverJob {
     Solve((DaturaPow, Instant)),
 }
 
+impl SolverJob {
+    pub fn print(&self) {
+        match self {
+            SolverJob::Verify((pow,_,_))|SolverJob::Solve((pow,_)) => {
+                pow.print();
+            }
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub enum SolverResult {
     Valid((DaturaPow, Vec<u8>)),
@@ -19,6 +29,20 @@ pub enum SolverResult {
     Error(SolverError),
 }
 
+impl SolverResult {
+    pub fn print(&self) {
+        match self {
+            SolverResult::Valid((pow,_))|SolverResult::Invalid((pow,_))|SolverResult::Solved((pow,_)) => {
+                pow.print();
+            }
+            SolverResult::Error(err) => {
+                println!("error: {:?}",err);
+            }
+        }
+    }
+}
+
+
 ///Structure for datura network proof of work, can be autonomously generated
 ///or created from a p2pool job
 #[derive(Debug, Clone)]
@@ -26,7 +50,7 @@ pub struct DaturaPow {
     pub blob: [u8; 76],
     pub seed_hash: [u8; 32],
     pub job_id: String,
-    pub target: u64,
+    pub target: String,
 }
 
 impl TryFrom<JobData> for DaturaPow {
@@ -36,12 +60,15 @@ impl TryFrom<JobData> for DaturaPow {
             job_id: work_order.job_id,
             blob: hex::decode(work_order.blob)?.as_slice().try_into()?,
             seed_hash: hex::decode(work_order.seed_hash)?.as_slice().try_into()?,
-            target: u64::from_str_radix(&work_order.target, 16)?,
+            target: work_order.target,
         })
     }
 }
 
 impl DaturaPow {
+    pub fn print(&self) {
+        println!("job_id {}, blob {}, seed_hash {}",self.job_id,hex::encode(self.blob), hex::encode(self.seed_hash));
+    }
     pub fn new_nonce(&mut self) {
         fill(&mut self.blob[NONCE_OFFSET..NONCE_OFFSET + NONCE_SIZE]);
     }
@@ -51,7 +78,7 @@ impl DaturaPow {
     }
 
     ///Create new Datura pow from p2pool job data
-    pub fn new(blob: [u8; 76], seed_hash: [u8; 32], job_id: String, target: u64) -> Self {
+    pub fn new(blob: [u8; 76], seed_hash: [u8; 32], job_id: String, target: String) -> Self {
         DaturaPow {
             blob,
             seed_hash,
@@ -61,7 +88,7 @@ impl DaturaPow {
     }
 
     ///generate really random challenge
-    pub fn random(target: Option<u64>, seed_hash: [u8; 32]) -> Self {
+    pub fn random(seed_hash: [u8; 32]) -> Self {
         let mut blob = [0u8; 76];
         let mut job_id = [0u8; 32];
 
@@ -72,7 +99,7 @@ impl DaturaPow {
             job_id: hex::encode(&job_id),
             blob,
             seed_hash,
-            target: target.unwrap_or(MINIMAL_DIFFICULTY),
+            target: MINIMAL_DIFFICULTY.to_string(),
         }
     }
 }

@@ -1,5 +1,5 @@
-use super::solver::SolverMode;
 use randomx_rs::*;
+use crate::SolverMode;
 
 ///Calculate hash difficulty from a hash for filtering and routing shares
 pub fn hash_to_difficulty(hash: &[u8; 32]) -> u64 {
@@ -54,5 +54,43 @@ pub fn hash_to_difficulty(hash: &[u8; 32]) -> u64 {
 }
 
 pub fn get_flags(mode: SolverMode) -> RandomXFlag {
-    RandomXFlag::get_recommended_flags()
+    RandomXFlag::get_recommended_flags() | {
+        if mode == SolverMode::Fast {
+            RandomXFlag::FLAG_FULL_MEM
+        }
+        else {
+            RandomXFlag::empty()
+        }
+    }
+}
+
+pub fn get_difficulty(hex_str: &str) -> Result<u64, String> {
+    
+    let compact = u32::from_str_radix(hex_str, 16)
+        .map_err(|e| format!("Invalid hex string: {}", e))?;
+    
+    // Extract size (number of bytes) from the most significant byte
+    let size = (compact >> 24) as usize;
+    
+    // Extract the mantissa (lower 3 bytes)
+    let mantissa = compact & 0x00FFFFFF;
+    
+    // Calculate the full target
+    let target = if size <= 3 {
+        // If size is 3 or less, shift right
+        (mantissa as u64) >> (8 * (3 - size))
+    } else {
+        // Otherwise shift left
+        (mantissa as u64) << (8 * (size - 3))
+    };
+    
+    // Difficulty is max_target / target
+    // For Monero, max_target is 2^64 - 1
+    if target == 0 {
+        return Err("Target cannot be zero".to_string());
+    }
+    
+    let difficulty = u64::MAX / target;
+    
+    Ok(difficulty)
 }

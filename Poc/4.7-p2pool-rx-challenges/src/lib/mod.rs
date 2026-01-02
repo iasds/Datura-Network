@@ -1,5 +1,5 @@
 mod client;
-mod consts;
+pub mod consts;
 mod solver;
 pub use client::{Client, ClientError};
 pub use solver::*;

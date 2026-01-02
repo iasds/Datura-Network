@@ -43,9 +43,7 @@ impl WorkerState {
         thread_seed: &mut [u8; 32],
         vm: &mut Option<RandomXVM>,
     ) {
-        println!("workerstate: updating state");
         let mut seed_guard = seed.blocking_write();
-        println!("got seed");
         //cases:
         //global cache and dataset have been updated but not local vm => global seed is OK but
         //disagrees with thread local seed
@@ -56,18 +54,15 @@ impl WorkerState {
         if *job_seed == *seed_guard && job_seed != thread_seed {
             //case 1
             //only need to reinit local vm
-            println!("workerstate: reinit local vm");
             *thread_seed = *seed_guard;
             match self {
                 WorkerState::Light { cache } => {
                     let _cache_guard = cache.cache.blocking_read();
                     match vm {
                         Some(rxvm) => {
-                            println!("workerstate: reinit cache");
                             rxvm.reinit_cache(cache.get()).unwrap();
                         }
                         None => {
-                            println!("new light vm");
                             *vm = Some(RandomXVM::new(flags, Some(cache.get()), None).unwrap());
                         }
                     }
@@ -79,14 +74,12 @@ impl WorkerState {
                             rxvm.reinit_dataset(dataset.get()).unwrap();
                         }
                         None => {
-                            println!("new fast vm");
                             *vm = Some(RandomXVM::new(flags, None, Some(dataset.get())).unwrap());
                         }
                     }
                 }
             }
         } else if *job_seed != *seed_guard {
-            println!("seed update");
             if *seed_guard == *job_seed {
                 //someone already finished updating the cache and dataset
                 //while we were waiting on seed guard
@@ -96,19 +89,16 @@ impl WorkerState {
                 *seed_guard = *job_seed;
                 match self {
                     WorkerState::Light { cache, .. } => {
-                        println!("rebuilding cache");
                         let mut cache_guard = cache.cache.blocking_write();
                         *cache_guard = UnsafeCell::new(RandomXCache::new(flags, job_seed).unwrap());
                     }
                     WorkerState::Fast { dataset, .. } => {
-                        println!("rebuilding dataset");
                         let cache = RandomXCache::new(flags, job_seed).unwrap();
                         let mut ds_guard = dataset.dataset.blocking_write();
                         *ds_guard = UnsafeCell::new(RandomXDataset::new(flags, cache, 0).unwrap());
                     }
                 }
                 //now let's run again to update our vm state and let others work
-                println!("running again to update vm");
                 drop(seed_guard);
                 self.update(flags, seed.clone(), job_seed, thread_seed, vm);
             }
@@ -137,10 +127,8 @@ impl Worker {
     }
 
     pub fn start(&mut self) {
-        println!("starting worker");
         let mut vm = None;
         while let Some(job) = self.job_channel.blocking_recv() {
-            println!("got worker job {:?}", job);
             self.available.store(false, Ordering::Release);
             let pow = get_pow(&job);
             self.state.update(
@@ -150,13 +138,13 @@ impl Worker {
                 &mut self.thread_seed,
                 &mut vm,
             );
-            println!("done updating");
             match job {
                 SolverJob::Verify((pow, solution_candidate, _)) => {
-                    println!("verify job");
                     let difficulty =
                         hash_to_difficulty(solution_candidate.as_slice().try_into().unwrap());
-                    if difficulty < pow.target {
+                    let target_diff = get_difficulty(&pow.target).unwrap();
+                    if difficulty > target_diff {
+                        println!("not at target diff (worker drop");
                         self.job_results.blocking_send(SolverResult::Invalid((
                             pow,
                             WorkerError::LowDifficultyShare.into(),
@@ -166,10 +154,12 @@ impl Worker {
                     if let Some(ref rxvm) = vm {
                         let solution = rxvm.calculate_hash(&pow.blob).unwrap();
                         if solution != solution_candidate {
+                            println!("bad solution");
                             self.job_results.blocking_send(SolverResult::Error(
                                 SolverError::DaturaPowInvalidResponse,
                             ));
                         } else {
+                            println!("valid result {} for target at {}", difficulty, target_diff);
                             self.job_results
                                 .blocking_send(SolverResult::Valid((pow, solution)));
                         }
@@ -178,8 +168,8 @@ impl Worker {
                     }
                 }
                 SolverJob::Solve((mut pow, end_date)) => {
-                    println!("solve job");
-                    let mut best_solution = (DaturaPow::random(None, [0u8; 32]), Vec::new(), 1u64);
+                    let mut best_solution = (DaturaPow::random([0u8; 32]), Vec::new(), 0u64);
+                    let target_diff = get_difficulty(&pow.target).unwrap();
                     while Instant::now() < end_date {
                         pow.new_nonce();
                         let result = if let Some(ref rxvm) = vm {
@@ -188,11 +178,15 @@ impl Worker {
                             panic!("no vm to run!");
                         };
                         let difficulty = hash_to_difficulty(result.as_slice().try_into().unwrap());
-                        if difficulty > pow.target && difficulty > best_solution.2 {
+                        if difficulty <= target_diff {
+                            println!("found a solution with diff {} for target {}",difficulty, target_diff);
                             best_solution = (pow.clone(), result.clone(), difficulty);
+                            //this thread has done its job and found a result, returning it ASAP
+                            //while others might continue to search
+                            break;
                         }
                     }
-                    if best_solution.2 >= pow.target {
+                    if best_solution.2 >= target_diff {
                         self.job_results.blocking_send(SolverResult::Solved((
                             best_solution.0,
                             best_solution.1,

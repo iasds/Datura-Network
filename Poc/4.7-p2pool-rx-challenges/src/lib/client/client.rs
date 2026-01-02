@@ -4,8 +4,8 @@ use crate::consts;
 use crate::solver::*;
 use crate::utils::hash_to_difficulty;
 use rand::fill;
-use std::collections::HashMap;
 use std::ops::Add;
+use crate::utils::get_difficulty;
 use std::sync::Arc;
 use std::time::Instant;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
@@ -14,19 +14,12 @@ use tokio::sync::{RwLock, mpsc};
 use tokio::task::spawn;
 use tokio::time::{Duration, sleep};
 
-#[derive(Debug)]
-struct ShareInfo {
-    pub target: u64,
-    pub date: Instant,
-}
-
 pub struct Client {
     random_seed: RwLock<([u8; 32], Instant)>,
     stream: Option<RwLock<BufReader<TcpStream>>>,
     last_datura_pow: RwLock<DaturaPow>,
     last_id: RwLock<i64>,
     worker_id: RwLock<String>,
-    job_list: RwLock<HashMap<String, ShareInfo>>,
     submission_channel: RwLock<mpsc::Receiver<SolverResult>>,
 }
 
@@ -35,9 +28,10 @@ pub type P2poolReply = Result<(), PoolError>;
 impl Client {
     pub async fn start(this: Arc<Self>) {
         let me = this.clone();
-        if this.stream.is_some() {
             spawn(Self::retrieve_challenges(me));
-        } else {
+            
+        if !this.stream.is_some() {
+        let me = this.clone();
             spawn(Self::drop_challenges(me));
         }
         let me = this.clone();
@@ -46,11 +40,6 @@ impl Client {
 
     pub async fn maintenance_task(this: Arc<Self>) {
         loop {
-            //remove all expired jobs
-
-            let mut job_list_guard = this.job_list.write().await;
-            job_list_guard.retain(|_, ShareInfo { date, .. }| *date > Instant::now());
-            drop(job_list_guard);
             let mut r_seed_guard = this.random_seed.write().await;
             if r_seed_guard.1 < Instant::now() {
                 //time for a new random_seed
@@ -59,75 +48,50 @@ impl Client {
                 *r_seed_guard = (new_seed, Instant::now().add(consts::SEED_LIFETIME));
             }
             drop(r_seed_guard);
-            sleep(consts::POW_MAX_LIFETIME).await;
+            sleep(consts::SEED_LIFETIME.add(Duration::from_secs(1))).await;
         }
     }
 
     pub async fn get_solver_job(this: Arc<Self>) -> SolverJob {
-        let mut job_list = this.job_list.write().await;
-        let mut last_datura_pow = this.last_datura_pow.write().await;
-        let random_seed = this.random_seed.read().await;
 
-        let shareinfo = match job_list.get(&last_datura_pow.job_id) {
-            Some(si) => si,
-            None => &ShareInfo {
-                target: 1,
-                date: Instant::now(),
-            },
-        };
-
-        if shareinfo.date > Instant::now() {
-            println!("reusing last pow");
             let last_datura_pow = this.last_datura_pow.read().await;
-            SolverJob::Solve((last_datura_pow.clone(), shareinfo.date))
-        } else {
-            println!("creating new pow");
-            let pow = DaturaPow::random(None, random_seed.0.clone());
-            let expiration_date = Instant::now().add(consts::POW_MAX_LIFETIME);
-            job_list.insert(
-                pow.job_id.clone(),
-                ShareInfo {
-                    target: pow.target,
-                    date: expiration_date,
-                },
-            );
-            *last_datura_pow = pow.clone();
-            SolverJob::Solve((pow, expiration_date))
-        }
+            SolverJob::Solve((last_datura_pow.clone(), Instant::now().add(consts::POW_MAX_LIFETIME)))
+
     }
 
     pub async fn retrieve_challenges(this: Arc<Self>) {
-        let mut line = String::new();
         if let Some(reader) = &this.stream {
+        let mut line = String::new();
             let mut read_guard = reader.write().await;
             let mut submission_channel = this.submission_channel.write().await;
             loop {
                 tokio::select! {
                 _ = read_guard.read_line(&mut line) => {
+                        println!("received job {}",line);
                         if let Ok(ServerReply::WorkOrder { params, .. }) =
                             serde_json::from_str::<ServerReply>(&line)
                         {
                             let pow: DaturaPow = params.clone().try_into().unwrap();
-                            let mut job_list = this.job_list.write().await;
-                            job_list.insert(params.job_id.clone(), ShareInfo { target:pow.target, date: Instant::now() });
 
                             let mut last_datura_pow = this.last_datura_pow.write().await;
                             *last_datura_pow = pow;
                         }
                         else {
-                            println!("receivedd {}",line);
+                            println!("received {}",line);
                         }
+                        line.clear();
                 }
                 Some(solver_output) = submission_channel.recv() => {
-                            println!("got new output submission: {:?}",solver_output);
-                            let job_list = this.job_list.read().await;
 
+                                println!("client received a solved job");
                                 if let SolverResult::Valid((pow,solution))  = solver_output {
+                                    let last = this.last_datura_pow.read().await;
+                                    let last_target = get_difficulty(&last.target).unwrap();
+                                    drop(last);
 
-                            if let Some(ShareInfo{target,..}) = job_list.get(&pow.job_id) {
                                     let difficulty = hash_to_difficulty(solution.as_slice().try_into().unwrap());
-                                    if difficulty >= *target {
-                                        println!("result difficulty: {}, target diff: {}",difficulty, target);
+                                    if difficulty <= last_target {
+                                        println!("result difficulty: {}, target diff: {}",difficulty, last_target);
                                         let mut last_id_guard = this.last_id.write().await;
                                         *last_id_guard += 1;
                                         let worker_id = this.worker_id.read().await;
@@ -145,16 +109,28 @@ impl Client {
                                                     .await.unwrap();
                                     }
                                     else {
-                                        println!("result diff is too low: {} for {}", difficulty, target);
+                                        println!("result diff is too low: {} for {}", difficulty, last_target);
                                     }
                                 }
+                                else {
+                                    println!("bad job type {:?}",solver_output);
+                                }
 
-                            }
                 }
 
                 }
-                line.clear();
             }
+        }
+        else {
+            loop {
+            println!("creating new pow");
+        let random_seed = this.random_seed.read().await;
+            let pow = DaturaPow::random( random_seed.0.clone());
+            let mut last_datura_pow = this.last_datura_pow.write().await;
+            *last_datura_pow = pow.clone();
+            drop(last_datura_pow);
+            sleep(consts::POW_MAX_LIFETIME).await;
+}
         }
     }
 
@@ -170,7 +146,6 @@ impl Client {
         addr: Option<String>,
         submission_channel: mpsc::Receiver<SolverResult>,
     ) -> Result<Arc<Self>, ClientError> {
-        let mut job_list = HashMap::new();
         let mut r_seed = [0u8; 32];
         fill(&mut r_seed);
 
@@ -201,42 +176,24 @@ impl Client {
             } else {
                 panic!("login failed");
             };
-            let last_datura_pow: DaturaPow = {
-                let pow: DaturaPow = last_job.clone().try_into()?;
-                job_list.insert(
-                    last_job.job_id.clone(),
-                    ShareInfo {
-                        date: Instant::now(),
-                        target: pow.target,
-                    },
-                );
-                pow
-            };
+            let last_datura_pow: DaturaPow =  last_job.clone().try_into()?;
+    
             return Ok(Arc::new(Client {
                 random_seed: RwLock::new((r_seed, Instant::now().add(consts::SEED_LIFETIME))),
                 stream: Some(RwLock::new(reader)),
                 last_datura_pow: RwLock::new(last_datura_pow),
                 last_id: RwLock::new(2),
                 worker_id: RwLock::new(worker_id),
-                job_list: RwLock::new(job_list),
                 submission_channel: RwLock::new(submission_channel),
             }));
         }
-        let pow = DaturaPow::random(None, r_seed.clone());
-        job_list.insert(
-            pow.job_id.clone(),
-            ShareInfo {
-                date: Instant::now(),
-                target: pow.target,
-            },
-        );
-        Ok(Arc::new(Client {
+        let pow = DaturaPow::random( r_seed.clone());
+                Ok(Arc::new(Client {
             last_datura_pow: RwLock::new(pow),
             random_seed: RwLock::new((r_seed, Instant::now().add(consts::SEED_LIFETIME))),
             stream: None,
             last_id: RwLock::new(1),
             worker_id: RwLock::new(String::new()),
-            job_list: RwLock::new(job_list),
             submission_channel: RwLock::new(submission_channel),
         }))
     }

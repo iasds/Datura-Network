@@ -24,7 +24,7 @@ pub struct Worker {
 }
 pub fn get_pow(job: &SolverJob) -> &DaturaPow {
     match job {
-        SolverJob::Verify((pow, _, _)) | SolverJob::Solve((pow, _)) => &pow,
+        SolverJob::Verify((pow, _, _)) | SolverJob::Solve((pow, _)) => pow,
     }
 }
 

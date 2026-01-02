@@ -30,7 +30,7 @@ impl Client {
         let me = this.clone();
         spawn(Self::retrieve_challenges(me));
 
-        if !this.stream.is_some() {
+        if this.stream.is_none() {
             let me = this.clone();
             spawn(Self::drop_challenges(me));
         }
@@ -125,7 +125,7 @@ impl Client {
             loop {
                 println!("creating new pow");
                 let random_seed = this.random_seed.read().await;
-                let pow = DaturaPow::random(random_seed.0.clone());
+                let pow = DaturaPow::random(random_seed.0);
                 let mut last_datura_pow = this.last_datura_pow.write().await;
                 *last_datura_pow = pow.clone();
                 drop(last_datura_pow);
@@ -187,7 +187,7 @@ impl Client {
                 submission_channel: RwLock::new(submission_channel),
             }));
         }
-        let pow = DaturaPow::random(r_seed.clone());
+        let pow = DaturaPow::random(r_seed);
         Ok(Arc::new(Client {
             last_datura_pow: RwLock::new(pow),
             random_seed: RwLock::new((r_seed, Instant::now().add(consts::SEED_LIFETIME))),

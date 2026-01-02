@@ -1,8 +1,8 @@
 use std::ops::Add;
 use tokio::sync::mpsc;
 use tokio::task::spawn;
-use tokio::time::{Duration, Instant, sleep, timeout};
-use xmr_pow_challenges::{Client, DaturaPow, Solver, SolverJob, SolverMode, SolverResult, consts};
+use tokio::time::{Duration, Instant, timeout};
+use xmr_pow_challenges::{Client, Solver, SolverJob, SolverMode, SolverResult, consts};
 
 #[tokio::main]
 async fn main() {
@@ -10,7 +10,7 @@ async fn main() {
     let (solver_output_sender, mut solver_output_receiver) = mpsc::channel(1);
     let (upstream_pool_sender, upstream_pool_receiver) = mpsc::channel(1);
     println!("creating a single thread light solver");
-    let mut solver = Solver::new(
+    let solver = Solver::new(
         SolverMode::Fast,
         6,
         solver_input_receiver,
@@ -29,7 +29,7 @@ async fn main() {
 
     //get ten jobs as fast as we can solve them
     loop {
-        let now = Instant::now();
+        let _now = Instant::now();
         let job = Client::get_solver_job(local_client.clone()).await;
         solver_input_sender.send(job.clone()).await;
         match timeout(consts::POW_MAX_LIFETIME, solver_output_receiver.recv()).await {

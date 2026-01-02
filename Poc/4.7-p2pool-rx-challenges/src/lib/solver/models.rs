@@ -102,7 +102,7 @@ impl DaturaPow {
         fill(&mut job_id);
 
         DaturaPow {
-            job_id: hex::encode(&job_id),
+            job_id: hex::encode(job_id),
             blob,
             seed_hash,
             target: MINIMAL_DIFFICULTY.to_string(),

@@ -27,16 +27,17 @@ async fn main() {
         .unwrap();
     spawn(Client::start(local_client.clone()));
 
-    //get ten jobs as fast as we can solve them
+    println!("solving jobs as fast as we can (each . is a new job, is $ is a valid solution produced");
     loop {
         let _now = Instant::now();
         let job = Client::get_solver_job(local_client.clone()).await;
+        print!(".");
         solver_input_sender.send(job.clone()).await.unwrap();
         match timeout(consts::POW_MAX_LIFETIME, solver_output_receiver.recv()).await {
             Err(_) => {}
             Ok(result) => {
                 if let SolverResult::Solved((pow, solution)) = result.unwrap() {
-                    println!("checking solution");
+                    print!("$");
                     solver_input_sender
                         .send(SolverJob::Verify((
                             pow,
@@ -47,6 +48,5 @@ async fn main() {
                 }
             }
         }
-        println!("\n");
     }
 }

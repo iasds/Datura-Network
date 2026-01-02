@@ -40,13 +40,14 @@
             doc = pkgs.rustPlatform.buildRustPackage {
               name = "pow-challenge-doc";
               dontCheck = true;
+              dontInstall = true;
               nativeBuildInputs = with pkgs; [cmake ];
               cargoLock.lockFile = ./Cargo.lock;
               src = ./.;
               buildPhase=  ''
                 mkdir -p $out
                 cargo doc --offline
-                cp -a target/doc/xmr_pow_challenges $out/'';
+                cp -a target/doc $out/'';
             };
           };
         devShells = {

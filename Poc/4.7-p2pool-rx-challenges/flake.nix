@@ -37,13 +37,15 @@
 
               cargoLock.lockFile = ./Cargo.lock;
             };
-            doc = pkgs.stdenv.mkDerivation {
+            doc = pkgs.rustPlatform.buildRustPackage {
               name = "pow-challenge-doc";
-              buildInputs=  with pkgs; [cargo];
+              nativeBuildInputs = with pkgs; [cmake ];
+              cargoLock.lockFile = ./Cargo.lock;
+              src = ./.;
               buildPhase=  ''
-                mkdir $out/doc
-                cd $src
-                cargo doc -o $out/doc'';
+                mkdir -p $out
+                cargo doc --offline
+                cp -a target/doc/xmr_pow_challenges $out/'';
             };
           };
         devShells = {

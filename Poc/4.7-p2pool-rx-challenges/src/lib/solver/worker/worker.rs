@@ -179,7 +179,10 @@ impl Worker {
                         };
                         let difficulty = hash_to_difficulty(result.as_slice().try_into().unwrap());
                         if difficulty <= target_diff {
-                            println!("found a solution with diff {} for target {}",difficulty, target_diff);
+                            println!(
+                                "found a solution with diff {} for target {}",
+                                difficulty, target_diff
+                            );
                             best_solution = (pow.clone(), result.clone(), difficulty);
                             //this thread has done its job and found a result, returning it ASAP
                             //while others might continue to search

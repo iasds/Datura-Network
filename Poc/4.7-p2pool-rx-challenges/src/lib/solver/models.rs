@@ -14,7 +14,7 @@ pub enum SolverJob {
 impl SolverJob {
     pub fn print(&self) {
         match self {
-            SolverJob::Verify((pow,_,_))|SolverJob::Solve((pow,_)) => {
+            SolverJob::Verify((pow, _, _)) | SolverJob::Solve((pow, _)) => {
                 pow.print();
             }
         }
@@ -32,16 +32,17 @@ pub enum SolverResult {
 impl SolverResult {
     pub fn print(&self) {
         match self {
-            SolverResult::Valid((pow,_))|SolverResult::Invalid((pow,_))|SolverResult::Solved((pow,_)) => {
+            SolverResult::Valid((pow, _))
+            | SolverResult::Invalid((pow, _))
+            | SolverResult::Solved((pow, _)) => {
                 pow.print();
             }
             SolverResult::Error(err) => {
-                println!("error: {:?}",err);
+                println!("error: {:?}", err);
             }
         }
     }
 }
-
 
 ///Structure for datura network proof of work, can be autonomously generated
 ///or created from a p2pool job
@@ -67,7 +68,12 @@ impl TryFrom<JobData> for DaturaPow {
 
 impl DaturaPow {
     pub fn print(&self) {
-        println!("job_id {}, blob {}, seed_hash {}",self.job_id,hex::encode(self.blob), hex::encode(self.seed_hash));
+        println!(
+            "job_id {}, blob {}, seed_hash {}",
+            self.job_id,
+            hex::encode(self.blob),
+            hex::encode(self.seed_hash)
+        );
     }
     pub fn new_nonce(&mut self) {
         fill(&mut self.blob[NONCE_OFFSET..NONCE_OFFSET + NONCE_SIZE]);

@@ -2,10 +2,10 @@ use super::errors::*;
 use super::models::*;
 use crate::consts;
 use crate::solver::*;
+use crate::utils::get_difficulty;
 use crate::utils::hash_to_difficulty;
 use rand::fill;
 use std::ops::Add;
-use crate::utils::get_difficulty;
 use std::sync::Arc;
 use std::time::Instant;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
@@ -28,10 +28,10 @@ pub type P2poolReply = Result<(), PoolError>;
 impl Client {
     pub async fn start(this: Arc<Self>) {
         let me = this.clone();
-            spawn(Self::retrieve_challenges(me));
-            
+        spawn(Self::retrieve_challenges(me));
+
         if !this.stream.is_some() {
-        let me = this.clone();
+            let me = this.clone();
             spawn(Self::drop_challenges(me));
         }
         let me = this.clone();
@@ -53,15 +53,16 @@ impl Client {
     }
 
     pub async fn get_solver_job(this: Arc<Self>) -> SolverJob {
-
-            let last_datura_pow = this.last_datura_pow.read().await;
-            SolverJob::Solve((last_datura_pow.clone(), Instant::now().add(consts::POW_MAX_LIFETIME)))
-
+        let last_datura_pow = this.last_datura_pow.read().await;
+        SolverJob::Solve((
+            last_datura_pow.clone(),
+            Instant::now().add(consts::POW_MAX_LIFETIME),
+        ))
     }
 
     pub async fn retrieve_challenges(this: Arc<Self>) {
         if let Some(reader) = &this.stream {
-        let mut line = String::new();
+            let mut line = String::new();
             let mut read_guard = reader.write().await;
             let mut submission_channel = this.submission_channel.write().await;
             loop {
@@ -120,17 +121,16 @@ impl Client {
 
                 }
             }
-        }
-        else {
+        } else {
             loop {
-            println!("creating new pow");
-        let random_seed = this.random_seed.read().await;
-            let pow = DaturaPow::random( random_seed.0.clone());
-            let mut last_datura_pow = this.last_datura_pow.write().await;
-            *last_datura_pow = pow.clone();
-            drop(last_datura_pow);
-            sleep(consts::POW_MAX_LIFETIME).await;
-}
+                println!("creating new pow");
+                let random_seed = this.random_seed.read().await;
+                let pow = DaturaPow::random(random_seed.0.clone());
+                let mut last_datura_pow = this.last_datura_pow.write().await;
+                *last_datura_pow = pow.clone();
+                drop(last_datura_pow);
+                sleep(consts::POW_MAX_LIFETIME).await;
+            }
         }
     }
 
@@ -176,8 +176,8 @@ impl Client {
             } else {
                 panic!("login failed");
             };
-            let last_datura_pow: DaturaPow =  last_job.clone().try_into()?;
-    
+            let last_datura_pow: DaturaPow = last_job.clone().try_into()?;
+
             return Ok(Arc::new(Client {
                 random_seed: RwLock::new((r_seed, Instant::now().add(consts::SEED_LIFETIME))),
                 stream: Some(RwLock::new(reader)),
@@ -187,8 +187,8 @@ impl Client {
                 submission_channel: RwLock::new(submission_channel),
             }));
         }
-        let pow = DaturaPow::random( r_seed.clone());
-                Ok(Arc::new(Client {
+        let pow = DaturaPow::random(r_seed.clone());
+        Ok(Arc::new(Client {
             last_datura_pow: RwLock::new(pow),
             random_seed: RwLock::new((r_seed, Instant::now().add(consts::SEED_LIFETIME))),
             stream: None,

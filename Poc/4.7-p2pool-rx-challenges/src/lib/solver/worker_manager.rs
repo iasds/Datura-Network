@@ -1,6 +1,6 @@
 use super::models::*;
 use super::utils::*;
-use crate::SolverError;
+use crate::solver::SolverError;
 use crate::consts::*;
 use crate::solver::worker::{Worker, WorkerState};
 use randomx_rs::*;

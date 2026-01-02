@@ -1,4 +1,4 @@
-use crate::SolverMode;
+use crate::solver::SolverMode;
 use randomx_rs::*;
 
 ///Calculate hash difficulty from a hash for filtering and routing shares

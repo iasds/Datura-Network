@@ -33,9 +33,7 @@ async fn main() {
         let job = Client::get_solver_job(local_client.clone()).await;
         solver_input_sender.send(job.clone()).await;
         match timeout(consts::POW_MAX_LIFETIME,solver_output_receiver.recv()).await {
-            Err(_) => {
-                println!("job timedout, no luck");
-            }
+            Err(_) => {}
             Ok(result) => {
                     if let SolverResult::Solved((pow, solution)) = result.unwrap()
                     {

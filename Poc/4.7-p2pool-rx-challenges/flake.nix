@@ -39,6 +39,7 @@
             };
             doc = pkgs.rustPlatform.buildRustPackage {
               name = "pow-challenge-doc";
+              dontCheck = true;
               nativeBuildInputs = with pkgs; [cmake ];
               cargoLock.lockFile = ./Cargo.lock;
               src = ./.;

@@ -1,4 +1,4 @@
 mod errors;
-mod worker;
+mod threaded_worker;
 pub use errors::*;
-pub use worker::*;
+pub use threaded_worker::*;

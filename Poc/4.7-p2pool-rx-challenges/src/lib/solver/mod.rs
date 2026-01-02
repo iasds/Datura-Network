@@ -1,8 +1,8 @@
 mod errors;
 mod models;
-mod solver;
+mod worker_manager;
 pub mod utils;
 mod worker;
 pub use errors::SolverError;
 pub use models::*;
-pub use solver::*;
+pub use worker_manager::*;

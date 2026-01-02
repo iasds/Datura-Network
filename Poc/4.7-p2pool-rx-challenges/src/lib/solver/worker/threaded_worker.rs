@@ -1,6 +1,6 @@
 use super::*;
 use crate::solver::SolverJob;
-use crate::solver::solver::{SharedCache, SharedDataset};
+use crate::solver::{SharedCache, SharedDataset};
 use crate::solver::utils::*;
 use crate::solver::*;
 use randomx_rs::*;

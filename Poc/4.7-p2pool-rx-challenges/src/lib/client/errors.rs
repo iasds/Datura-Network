@@ -1,20 +1,27 @@
 use crate::solver::SolverError;
 use thiserror::Error;
 
+///errors related to the client itself
 #[derive(Error, Debug)]
 pub enum ClientError {
+    ///error communicationg with the p2pool server
     #[error("p2pool server error")]
     P2poolError(#[from] PoolError),
+
+    ///stream connection lost/corrupted
     #[error("error reading stream from server")]
     ReadError(#[from] tokio::io::Error),
+
+    ///unknown/unparseable p2pool message received
     #[error("error parsing server message")]
     ParseError(#[from] serde_json::Error),
+
+    ///Conversion failure from p2pool job to daturaPow
     #[error("error converting job to DaturaPow")]
     ConversionError(#[from] SolverError),
-    #[error("unknown job Id")]
-    UnknownJob,
 }
 
+///Errors related with the p2pool server/proxy instance
 #[derive(Error, Debug)]
 pub enum PoolError {
     #[error("p2pool server disconnected")]

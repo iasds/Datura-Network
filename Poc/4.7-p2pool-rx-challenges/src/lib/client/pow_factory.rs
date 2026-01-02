@@ -73,7 +73,6 @@ impl Client {
             loop {
                 tokio::select! {
                 _ = read_guard.read_line(&mut line) => {
-                        println!("received job {}",line);
                         if let Ok(ServerReply::WorkOrder { params, .. }) =
                             serde_json::from_str::<ServerReply>(&line)
                         {

@@ -14,6 +14,8 @@ use tokio::sync::{RwLock, mpsc};
 use tokio::task::spawn;
 use tokio::time::{Duration, sleep};
 
+/// Client for connecting to p2pool/xmrig proxy and retrieve jobs for making
+/// datura proof of work
 pub struct Client {
     random_seed: RwLock<([u8; 32], Instant)>,
     stream: Option<RwLock<BufReader<TcpStream>>>,
@@ -24,6 +26,9 @@ pub struct Client {
 }
 
 impl Client {
+
+    /// start this client (must be called from the module level
+    /// to allow for multithreading
     pub async fn start(this: Arc<Self>) {
         let me = this.clone();
         spawn(Self::retrieve_challenges(me));
@@ -36,7 +41,7 @@ impl Client {
         spawn(Self::maintenance_task(me));
     }
 
-    pub async fn maintenance_task(this: Arc<Self>) {
+    async fn maintenance_task(this: Arc<Self>) {
         loop {
             let mut r_seed_guard = this.random_seed.write().await;
             if r_seed_guard.1 < Instant::now() {
@@ -50,6 +55,8 @@ impl Client {
         }
     }
 
+    /// asynchronously obtain a SolverJob object, this will always either return a job based
+    /// on the latest p2pool job or a random daturapow if running in local-only mode
     pub async fn get_solver_job(this: Arc<Self>) -> SolverJob {
         let last_datura_pow = this.last_datura_pow.read().await;
         SolverJob::Solve((
@@ -58,7 +65,7 @@ impl Client {
         ))
     }
 
-    pub async fn retrieve_challenges(this: Arc<Self>) {
+    async fn retrieve_challenges(this: Arc<Self>) {
         if let Some(reader) = &this.stream {
             let mut line = String::new();
             let mut read_guard = reader.write().await;
@@ -132,13 +139,15 @@ impl Client {
         }
     }
 
-    pub async fn drop_challenges(this: Arc<Self>) {
+    async fn drop_challenges(this: Arc<Self>) {
         let mut submission_channel = this.submission_channel.write().await;
         while submission_channel.recv().await.is_some() {
             println!("running in local mode, dropping solution");
         }
     }
 
+    ///create a new client with an optional address (set to None if running local only),
+    ///the receiver is required for linking with a Solver object
     pub async fn new(
         addr: Option<String>,
         submission_channel: mpsc::Receiver<SolverResult>,

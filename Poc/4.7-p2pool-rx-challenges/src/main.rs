@@ -1,8 +1,8 @@
 use std::ops::Add;
 use tokio::sync::mpsc;
 use tokio::task::spawn;
-use tokio::time::{Duration, Instant, sleep};
-use xmr_pow_challenges::{Client, DaturaPow, Solver, SolverJob, SolverMode, SolverResult};
+use tokio::time::{timeout,Duration, Instant, sleep};
+use xmr_pow_challenges::{consts,Client, DaturaPow, Solver, SolverJob, SolverMode, SolverResult};
 
 #[tokio::main]
 async fn main() {
@@ -11,8 +11,8 @@ async fn main() {
     let (upstream_pool_sender, upstream_pool_receiver) = mpsc::channel(1);
     println!("creating a single thread light solver");
     let mut solver = Solver::new(
-        SolverMode::Fast,
-        1,
+        SolverMode::Light,
+        4,
         solver_input_receiver,
         solver_output_sender,
         upstream_pool_sender,
@@ -31,70 +31,25 @@ async fn main() {
     loop {
         let now = Instant::now();
         let job = Client::get_solver_job(local_client.clone()).await;
-        println!("main got job {:?}", job);
-        println!("sending for solve");
-        solver_input_sender.send(job).await;
-        println!("now awaiting result");
-        if let SolverResult::Solved((pow, solution)) = solver_output_receiver.recv().await.unwrap()
-        {
-            println!("checking solution");
-            solver_input_sender
-                .send(SolverJob::Verify((
-                    pow,
-                    solution,
-                    Instant::now().add(Duration::from_secs(5)).into(),
-                )))
-                .await;
+        solver_input_sender.send(job.clone()).await;
+        match timeout(consts::POW_MAX_LIFETIME,solver_output_receiver.recv()).await {
+            Err(_) => {
+                println!("job timedout, no luck");
+            }
+            Ok(result) => {
+                    if let SolverResult::Solved((pow, solution)) = result.unwrap()
+                    {
+                        println!("checking solution");
+                        solver_input_sender
+                            .send(SolverJob::Verify((
+                                pow,
+                                solution,
+                                Instant::now().add(Duration::from_secs(5)).into(),
+                            )))
+                            .await;
+                    }
+            }
         }
-        println!(
-            "got result {:?}",
-            solver_output_receiver.recv().await.unwrap()
-        );
-
-        println!("full elapsed time: {:2?}", now.elapsed());
         println!("\n");
     }
-
-    /*
-    spawn(solver.do_work());
-    for i in 1..5 {
-        //to avoid spending time rebuiding cache and be more realistic we use the same seedhash
-        let mut pow = DaturaPow::random(Some(i), Some([1u8;32]));
-        let mut pow2 = pow.clone();
-        let now = std::time::Instant::now();
-        let (answer,solution) = solver.solve_challenge(pow).unwrap();
-        println!("solved difficulty {} in {:.2?} with {}",i,now.elapsed(),hex::encode(&solution));
-
-        let now = std::time::Instant::now();
-        solver.check_answer(&answer).unwrap();
-        println!("checked answer in {:.2?}",now.elapsed());
-        println!("");
-        println!("solving with fast solver");
-        let now = std::time::Instant::now();
-        let (answer,solution) = solver.solve_challenge(pow2).unwrap();
-        println!("solved difficulty {} in {:.2?}",i,now.elapsed());
-        println!("checking with fast solver");
-        let now = std::time::Instant::now();
-        solver.check_answer(&answer).unwrap();
-        println!("checked answer in {:.2?}",now.elapsed());
-        println!("");
-        println!("");
-        break;
-    }
-
-
-    let local_client = Client::new(Some("127.0.0.1:3355".to_string()),solver_output_receiver)
-        .await
-        .unwrap();
-    loop {
-        match client.get_challenge().await {
-            Ok(mut result) => {
-            result.target = 1;
-            let (answer,solution) = solver.solve_challenge(result).unwrap();
-            client.submit_solution(answer, solution).await.unwrap();
-            },
-            other => println!("{:?}",other),
-        }
-    }
-    */
 }

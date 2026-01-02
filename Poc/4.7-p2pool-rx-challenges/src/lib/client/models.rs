@@ -50,6 +50,7 @@ impl StratumQuery {
     }
 }
 
+#[allow(unused)]
 #[derive(Deserialize, Debug)]
 pub struct Job {
     pub id: String,
@@ -58,6 +59,7 @@ pub struct Job {
     status: String,
 }
 
+#[allow(unused)]
 #[derive(Deserialize, Clone, Debug)]
 pub struct JobData {
     pub blob: String,
@@ -74,6 +76,7 @@ pub struct MinerLoginReply {
     pub job: JobData,
 }
 
+#[allow(unused)]
 #[derive(Deserialize, Debug, Clone)]
 #[serde(untagged)]
 pub enum ServerReply {

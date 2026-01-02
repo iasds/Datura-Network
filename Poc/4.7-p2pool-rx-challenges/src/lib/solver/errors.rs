@@ -1,5 +1,4 @@
 use super::worker::WorkerError;
-use crate::client::ServerReply;
 use randomx_rs::*;
 use std::array::TryFromSliceError;
 use std::num::ParseIntError;
@@ -7,8 +6,6 @@ use thiserror::Error;
 
 #[derive(Error, Debug, Clone)]
 pub enum SolverError {
-    #[error("couldn't create daturapow from this server reply")]
-    JobCreationError(ServerReply),
     #[error("error converting job hex to datura pow input")]
     HexError(#[from] hex::FromHexError),
     #[error("failed converting the hex to an u8 slice")]

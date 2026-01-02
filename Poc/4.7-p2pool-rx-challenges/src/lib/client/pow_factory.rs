@@ -23,8 +23,6 @@ pub struct Client {
     submission_channel: RwLock<mpsc::Receiver<SolverResult>>,
 }
 
-pub type P2poolReply = Result<(), PoolError>;
-
 impl Client {
     pub async fn start(this: Arc<Self>) {
         let me = this.clone();
@@ -136,7 +134,7 @@ impl Client {
 
     pub async fn drop_challenges(this: Arc<Self>) {
         let mut submission_channel = this.submission_channel.write().await;
-        while let Some(_) = submission_channel.recv().await {
+        while submission_channel.recv().await.is_some() {
             println!("running in local mode, dropping solution");
         }
     }

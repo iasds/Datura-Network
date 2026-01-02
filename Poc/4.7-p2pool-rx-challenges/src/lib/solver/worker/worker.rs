@@ -148,7 +148,7 @@ impl Worker {
                         self.job_results.blocking_send(SolverResult::Invalid((
                             pow,
                             WorkerError::LowDifficultyShare.into(),
-                        )));
+                        ))).unwrap();
                         continue;
                     }
                     if let Some(ref rxvm) = vm {
@@ -157,11 +157,11 @@ impl Worker {
                             println!("bad solution");
                             self.job_results.blocking_send(SolverResult::Error(
                                 SolverError::DaturaPowInvalidResponse,
-                            ));
+                            )).unwrap();
                         } else {
                             println!("valid result {} for target at {}", difficulty, target_diff);
                             self.job_results
-                                .blocking_send(SolverResult::Valid((pow, solution)));
+                                .blocking_send(SolverResult::Valid((pow, solution))).unwrap();
                         }
                     } else {
                         panic!("no vm to run!");
@@ -193,7 +193,7 @@ impl Worker {
                         self.job_results.blocking_send(SolverResult::Solved((
                             best_solution.0,
                             best_solution.1,
-                        )));
+                        ))).unwrap();
                     }
                 }
             }

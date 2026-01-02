@@ -144,10 +144,10 @@ impl Solver {
     pub async fn route_results(this: Arc<Self>) {
         let mut receiver = this.worker_output_receiver.write().await;
         while let Some(result) = receiver.recv().await {
-            this.solver_output.send(result.clone()).await;
+            this.solver_output.send(result.clone()).await.unwrap();
             if let SolverResult::Valid(_) = result {
                 println!("sending to pool");
-                this.upstream_pool.send(result.clone()).await;
+                this.upstream_pool.send(result.clone()).await.unwrap();
             }
         }
     }
@@ -204,17 +204,13 @@ impl Solver {
                     //verification job, only one thread required
                     //always give work to the worker who has been working the longest (round robin)
                     while deadline > (Instant::now() + VERIFY_USUAL_DURATION).into() {
-                        w_chans
-                            .iter()
-                            .filter(|w| w.available.load(Ordering::Acquire));
-                        if let Some(work_allocation) = w_chans.first() {
-                            work_allocation.job_channel.send(solverjob.clone()).await;
+                        if let Some(work_allocation) = w_chans.iter().find(|w| w.available.load(Ordering::Acquire)){
+                            work_allocation.job_channel.send(solverjob.clone()).await.unwrap();
                             break;
-                        } else {
+                        } 
                             //wait for the longest possible time a verify job can take and try
                             //again
-                            sleep(VERIFY_USUAL_DURATION).await;
-                        }
+                        sleep(VERIFY_USUAL_DURATION).await;
                     }
                 }
                 SolverJob::Solve((_, deadline)) => {
@@ -232,7 +228,7 @@ impl Solver {
                                 .iter()
                                 .filter(|w| w.available.load(Ordering::Acquire))
                             {
-                                w.job_channel.send(solverjob.clone()).await;
+                                w.job_channel.send(solverjob.clone()).await.unwrap();
                             }
                             break;
                         } else {

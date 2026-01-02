@@ -138,7 +138,6 @@ impl Client {
         let mut submission_channel = this.submission_channel.write().await;
         while let Some(_) = submission_channel.recv().await {
             println!("running in local mode, dropping solution");
-            sleep(Duration::from_millis(500));
         }
     }
 

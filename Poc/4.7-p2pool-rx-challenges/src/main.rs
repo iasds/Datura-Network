@@ -31,7 +31,7 @@ async fn main() {
     loop {
         let _now = Instant::now();
         let job = Client::get_solver_job(local_client.clone()).await;
-        solver_input_sender.send(job.clone()).await;
+        solver_input_sender.send(job.clone()).await.unwrap();
         match timeout(consts::POW_MAX_LIFETIME, solver_output_receiver.recv()).await {
             Err(_) => {}
             Ok(result) => {
@@ -43,7 +43,7 @@ async fn main() {
                             solution,
                             Instant::now().add(Duration::from_secs(5)).into(),
                         )))
-                        .await;
+                        .await.unwrap();
                 }
             }
         }

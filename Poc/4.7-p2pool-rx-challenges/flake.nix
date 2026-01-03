@@ -66,6 +66,7 @@
             shellHook = ''
               export CARGO_HOME="$PWD/.cargo"
               export PATH="$CARGO_HOME/bin:$PATH"
+              export LD_LIBRARY_PATH="${pkgs.stdenv.cc.cc.lib}/lib";
               mkdir -p .cargo
               echo '*' > .cargo/.gitignore
             '';

@@ -22,7 +22,7 @@ pub struct Client {
     last_datura_pow: RwLock<DaturaPow>,
     last_id: RwLock<i64>,
     worker_id: RwLock<String>,
-    submission_channel: RwLock<mpsc::Receiver<SolverResult>>,
+    submission_channel: Option<RwLock<mpsc::Receiver<SolverResult>>>,
 }
 
 impl Client {
@@ -32,11 +32,6 @@ impl Client {
     pub async fn start(this: Arc<Self>) {
         let me = this.clone();
         spawn(Self::retrieve_challenges(me));
-
-        if this.stream.is_none() {
-            let me = this.clone();
-            spawn(Self::drop_challenges(me));
-        }
         let me = this.clone();
         spawn(Self::maintenance_task(me));
     }
@@ -66,10 +61,10 @@ impl Client {
     }
 
     async fn retrieve_challenges(this: Arc<Self>) {
-        if let Some(reader) = &this.stream {
+        if let (Some(reader),Some(sub_channel)) = (&this.stream, &this.submission_channel) {
             let mut line = String::new();
             let mut read_guard = reader.write().await;
-            let mut submission_channel = this.submission_channel.write().await;
+            let mut submission_channel =sub_channel.write().await;
             loop {
                 tokio::select! {
                 _ = read_guard.read_line(&mut line) => {
@@ -138,19 +133,23 @@ impl Client {
         }
     }
 
-    async fn drop_challenges(this: Arc<Self>) {
-        let mut submission_channel = this.submission_channel.write().await;
-        while submission_channel.recv().await.is_some() {
-            println!("running in local mode, dropping solution");
-        }
-    }
-
     ///create a new client with an optional address (set to None if running local only),
     ///the receiver is required for linking with a Solver object
     pub async fn new(
         addr: Option<String>,
-        submission_channel: mpsc::Receiver<SolverResult>,
+        submission_channel: Option<mpsc::Receiver<SolverResult>>,
     ) -> Result<Arc<Self>, ClientError> {
+
+        match (addr.is_some(), submission_channel.is_some()) {
+            (true, false) => {
+                return Err(ClientError::InitializationError("address provided but no pool submission channel".to_string()));
+            }
+            (false, true) => {
+                return Err(ClientError::InitializationError("pool submission provided but no server address".to_string()));
+            }
+            _ => {}
+        }
+
         let mut r_seed = [0u8; 32];
         fill(&mut r_seed);
 
@@ -189,7 +188,7 @@ impl Client {
                 last_datura_pow: RwLock::new(last_datura_pow),
                 last_id: RwLock::new(2),
                 worker_id: RwLock::new(worker_id),
-                submission_channel: RwLock::new(submission_channel),
+                submission_channel: Some(RwLock::new(submission_channel.unwrap())),
             }));
         }
         let pow = DaturaPow::random(r_seed);
@@ -199,7 +198,7 @@ impl Client {
             stream: None,
             last_id: RwLock::new(1),
             worker_id: RwLock::new(String::new()),
-            submission_channel: RwLock::new(submission_channel),
+            submission_channel: None,
         }))
     }
 }

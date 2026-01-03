@@ -100,7 +100,7 @@ pub struct Solver {
     pub solver_output: mpsc::Sender<SolverResult>,
 
     ///used by the solver when a share can be sent back to the pool
-    upstream_pool: mpsc::Sender<SolverResult>,
+    upstream_pool: Option<mpsc::Sender<SolverResult>>,
 
     seed: Arc<RwLock<[u8; 32]>>,
     nb_threads: usize,
@@ -121,7 +121,7 @@ impl Solver {
         mut nb_threads: usize,
         solver_input: mpsc::Receiver<SolverJob>,
         solver_output: mpsc::Sender<SolverResult>,
-        upstream_pool: mpsc::Sender<SolverResult>,
+        upstream_pool: Option<mpsc::Sender<SolverResult>>,
     ) -> Result<Arc<Self>, SolverError> {
         nb_threads = min(nb_threads, num_cpus::get());
         //always at least one worker thread
@@ -145,9 +145,9 @@ impl Solver {
         let mut receiver = this.worker_output_receiver.write().await;
         while let Some(result) = receiver.recv().await {
             this.solver_output.send(result.clone()).await.unwrap();
-            if let SolverResult::Valid(_) = result {
+            if let (SolverResult::Valid(_), Some(upstream_pool)) = (&result, &this.upstream_pool) {
                 println!("sending to pool");
-                this.upstream_pool.send(result.clone()).await.unwrap();
+                upstream_pool.send(result.clone()).await.unwrap();
             }
         }
     }

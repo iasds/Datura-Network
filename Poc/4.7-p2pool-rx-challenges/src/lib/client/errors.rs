@@ -8,6 +8,10 @@ pub enum ClientError {
     #[error("p2pool server error")]
     P2poolError(#[from] PoolError),
 
+    ///Error creating the client
+    #[error("wrong initialization parameters")]
+    InitializationError(String),
+
     ///stream connection lost/corrupted
     #[error("error reading stream from server")]
     ReadError(#[from] tokio::io::Error),

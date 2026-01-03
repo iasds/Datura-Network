@@ -24,5 +24,4 @@ pub const POW_MAX_LIFETIME: Duration = Duration::from_secs(3);
 /// random seed_hash max lifetime when used for genrating new pows
 pub const SEED_LIFETIME: Duration = Duration::from_hours(48);
 
-/// minimal difficulty for new client pows
-pub const MINIMAL_DIFFICULTY: u64 = 200; //to test
+pub const MIN_TARGET: &'static str = "ffff0021";

@@ -122,7 +122,6 @@ impl Client {
             }
         } else {
             loop {
-                println!("creating new pow");
                 let random_seed = this.random_seed.read().await;
                 let pow = DaturaPow::random(random_seed.0);
                 let mut last_datura_pow = this.last_datura_pow.write().await;

@@ -143,7 +143,7 @@ impl Worker {
                     let difficulty =
                         hash_to_difficulty(solution_candidate.as_slice().try_into().unwrap());
                     let target_diff = get_difficulty(&pow.target).unwrap();
-                    if difficulty > target_diff {
+                    if difficulty < target_diff {
                         println!("not at target diff (worker drop");
                         self.job_results.blocking_send(SolverResult::Invalid((
                             pow,
@@ -159,7 +159,6 @@ impl Worker {
                                 SolverError::DaturaPowInvalidResponse,
                             )).unwrap();
                         } else {
-                            println!("valid result {} for target at {}", difficulty, target_diff);
                             self.job_results
                                 .blocking_send(SolverResult::Valid((pow, solution))).unwrap();
                         }
@@ -178,18 +177,14 @@ impl Worker {
                             panic!("no vm to run!");
                         };
                         let difficulty = hash_to_difficulty(result.as_slice().try_into().unwrap());
-                        if difficulty <= target_diff {
-                            println!(
-                                "found a solution with diff {} for target {}",
-                                difficulty, target_diff
-                            );
+                        if difficulty >= target_diff {
                             best_solution = (pow.clone(), result.clone(), difficulty);
                             //this thread has done its job and found a result, returning it ASAP
                             //while others might continue to search
                             break;
                         }
                     }
-                    if best_solution.2 >= target_diff {
+                    if best_solution.2 >= target_diff && !best_solution.1.is_empty() {
                         self.job_results.blocking_send(SolverResult::Solved((
                             best_solution.0,
                             best_solution.1,

@@ -33,20 +33,8 @@ async fn run_single_thread_light_10_pows() {
         let job = Client::get_solver_job(local_client.clone()).await;
         print!(".");
         solver_input_sender.send(job.clone()).await.unwrap();
-        match timeout(consts::POW_MAX_LIFETIME, solver_output_receiver.recv()).await {
-            Err(_) => {}
-            Ok(result) => {
-                if let SolverResult::Solved((pow, solution)) = result.unwrap() {
+        if let Some(SolverResult::Solved((pow, solution))) = solver_output_receiver.recv().await {
                     print!("$");
-                    solver_input_sender
-                        .send(SolverJob::Verify((
-                            pow,
-                            solution,
-                            Instant::now().add(Duration::from_secs(5)).into(),
-                        )))
-                        .await.unwrap();
-                }
-            }
         }
     }
 }

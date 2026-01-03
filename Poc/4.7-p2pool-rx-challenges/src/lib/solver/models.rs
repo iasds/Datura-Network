@@ -1,4 +1,5 @@
 use super::errors::SolverError;
+use crate::consts;
 use proptest::{string,array};
 use crate::client::JobData;
 use crate::consts::*;
@@ -107,7 +108,7 @@ impl DaturaPow {
             job_id: hex::encode(job_id),
             blob,
             seed_hash,
-            target: MINIMAL_DIFFICULTY.to_string(),
+            target: consts::MIN_TARGET.to_string(),
         }
     }
 }

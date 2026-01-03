@@ -11,8 +11,8 @@ async fn main() {
     let (upstream_pool_sender, upstream_pool_receiver) = mpsc::channel(1);
     println!("creating a single thread light solver");
     let solver = Solver::new(
-        SolverMode::Fast,
-        6,
+        SolverMode::Light,
+        1,
         solver_input_receiver,
         solver_output_sender,
         upstream_pool_sender,

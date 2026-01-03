@@ -9,6 +9,8 @@ path = "src/lib/mod.rs"
 
 [dependencies]
 hex = "0.4.3"
+num-bigint = "0.4.6"
+num-traits = "0.2.19"
 num_cpus = "1.17.0"
 proptest = "1.9.0"
 rand = "0.9.2"

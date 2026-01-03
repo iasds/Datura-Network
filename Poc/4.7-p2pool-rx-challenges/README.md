@@ -24,7 +24,37 @@ The client will obtain new jobs from p2pool consisting of:
 ## example
 
 ~~~
-user@node:~$ nix run
+user@node:~$ nix develop #enter devshell
+user@node:~$ cargo test -- --no-capture
+~~~
+
+### output
+
+~~~
+running 2 tests                                                                                                       
+diff to target for min: ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
+test solver::utils::tests::test_diff_to_target ... ok
+proptest: FileFailurePersistence::SourceParallel set, but failed to find lib.rs or main.rs
+test solver::models::test_get_nonce ... ok                                                                            
+                                                           
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.05s
+
+     Running tests/local_light_single_thread.rs (target/debug/deps/local_light_single_thread-46b7bc99a6e7fc3e)
+
+running 1 test                                                                                                        
+creating a single thread light solver
+creating client for local pow gen                   
+solving jobs as fast as we can (each . is a new job, is $ is a valid solution produced
+.$.$.$.$.$.$.$.$.$.$test run_single_thread_light_10_pows ... ok
+                                                           
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.54s
+                                                           
+   Doc-tests xmr_pow_challenges      
+                                                           
+running 0 tests                            
+                                                                                                                      
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
 ~~~
 
 # usage

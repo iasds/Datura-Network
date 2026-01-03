@@ -1,8 +1,10 @@
 use super::errors::SolverError;
+use proptest::{string,array};
 use crate::client::JobData;
 use crate::consts::*;
 use rand::fill;
 use std::time::Instant;
+use proptest::prelude::*;
 
 ///Instant is the deadline
 #[derive(Debug, Clone)]
@@ -107,5 +109,27 @@ impl DaturaPow {
             seed_hash,
             target: MINIMAL_DIFFICULTY.to_string(),
         }
+    }
+}
+
+prop_compose! {
+    fn arb_datura_pow() (blob1 in array::uniform32(u8::MIN..u8::MAX), blob2 in array::uniform32(u8::MIN..u8::MAX), blob3 in array::uniform12(u8::MIN..u8::MAX), seed_hash in array::uniform32(u8::MIN..u8::MAX), job_id in string::string_regex(".*").unwrap()) -> DaturaPow {
+        let mut res = [0u8;76];
+        res[..32].copy_from_slice(&blob1);
+        res[32..64].copy_from_slice(&blob2);
+        res[64..].copy_from_slice(&blob3);
+        DaturaPow {
+            blob: res,
+            seed_hash,
+            job_id,
+            target: "toto".to_string(),
+        }
+    }
+}
+
+proptest! {
+    #[test]
+    fn test_get_nonce(pow in arb_datura_pow()) {
+        assert!(pow.get_nonce() != "".to_string());
     }
 }

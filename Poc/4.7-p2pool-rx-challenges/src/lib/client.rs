@@ -1,7 +1,7 @@
 use crate::consts;
-use crate::solver::*;
 use crate::solver::utils::get_difficulty;
 use crate::solver::utils::hash_to_difficulty;
+use crate::solver::*;
 use rand::fill;
 use std::ops::Add;
 use std::sync::Arc;
@@ -17,8 +17,6 @@ mod models;
 pub use errors::*;
 pub use models::*;
 
-
-
 /// Client for connecting to p2pool/xmrig proxy and retrieve jobs for making
 /// datura proof of work
 pub struct Client {
@@ -31,7 +29,6 @@ pub struct Client {
 }
 
 impl Client {
-
     /// start this client (must be called from the module level
     /// to allow for multithreading
     pub async fn start(this: Arc<Self>) {
@@ -66,10 +63,10 @@ impl Client {
     }
 
     async fn retrieve_challenges(this: Arc<Self>) {
-        if let (Some(reader),Some(sub_channel)) = (&this.stream, &this.submission_channel) {
+        if let (Some(reader), Some(sub_channel)) = (&this.stream, &this.submission_channel) {
             let mut line = String::new();
             let mut read_guard = reader.write().await;
-            let mut submission_channel =sub_channel.write().await;
+            let mut submission_channel = sub_channel.write().await;
             loop {
                 tokio::select! {
                 _ = read_guard.read_line(&mut line) => {
@@ -143,13 +140,16 @@ impl Client {
         addr: Option<String>,
         submission_channel: Option<mpsc::Receiver<SolverResult>>,
     ) -> Result<Arc<Self>, ClientError> {
-
         match (addr.is_some(), submission_channel.is_some()) {
             (true, false) => {
-                return Err(ClientError::InitializationError("address provided but no pool submission channel".to_string()));
+                return Err(ClientError::InitializationError(
+                    "address provided but no pool submission channel".to_string(),
+                ));
             }
             (false, true) => {
-                return Err(ClientError::InitializationError("pool submission provided but no server address".to_string()));
+                return Err(ClientError::InitializationError(
+                    "pool submission provided but no server address".to_string(),
+                ));
             }
             _ => {}
         }

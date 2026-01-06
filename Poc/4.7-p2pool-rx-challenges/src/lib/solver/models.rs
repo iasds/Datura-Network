@@ -1,11 +1,11 @@
 use super::errors::SolverError;
-use crate::consts;
-use proptest::{string,array};
 use crate::client::JobData;
+use crate::consts;
 use crate::consts::*;
+use proptest::prelude::*;
+use proptest::{array, string};
 use rand::fill;
 use std::time::Instant;
-use proptest::prelude::*;
 
 ///Instant is the deadline
 #[derive(Debug, Clone)]

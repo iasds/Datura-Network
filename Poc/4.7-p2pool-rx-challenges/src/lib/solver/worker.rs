@@ -1,7 +1,7 @@
 use super::*;
 use crate::solver::SolverJob;
-use crate::solver::{SharedCache, SharedDataset};
 use crate::solver::utils::*;
+use crate::solver::{SharedCache, SharedDataset};
 use std::cell::UnsafeCell;
 use std::sync::{
     Arc,
@@ -10,7 +10,6 @@ use std::sync::{
 use std::time::Instant;
 use tokio::sync::RwLock;
 use tokio::sync::mpsc;
-
 
 mod errors;
 pub use errors::*;
@@ -147,22 +146,27 @@ impl Worker {
                     let target_diff = get_difficulty(&pow.target).unwrap();
                     if difficulty < target_diff {
                         println!("not at target diff (worker drop");
-                        self.job_results.blocking_send(SolverResult::Invalid((
-                            pow,
-                            WorkerError::LowDifficultyShare.into(),
-                        ))).unwrap();
+                        self.job_results
+                            .blocking_send(SolverResult::Invalid((
+                                pow,
+                                WorkerError::LowDifficultyShare.into(),
+                            )))
+                            .unwrap();
                         continue;
                     }
                     if let Some(ref rxvm) = vm {
                         let solution = rxvm.calculate_hash(&pow.blob).unwrap();
                         if solution != solution_candidate {
                             println!("bad solution");
-                            self.job_results.blocking_send(SolverResult::Error(
-                                SolverError::DaturaPowInvalidResponse,
-                            )).unwrap();
+                            self.job_results
+                                .blocking_send(SolverResult::Error(
+                                    SolverError::DaturaPowInvalidResponse,
+                                ))
+                                .unwrap();
                         } else {
                             self.job_results
-                                .blocking_send(SolverResult::Valid((pow, solution))).unwrap();
+                                .blocking_send(SolverResult::Valid((pow, solution)))
+                                .unwrap();
                         }
                     } else {
                         panic!("no vm to run!");
@@ -187,10 +191,9 @@ impl Worker {
                         }
                     }
                     if best_solution.2 >= target_diff && !best_solution.1.is_empty() {
-                        self.job_results.blocking_send(SolverResult::Solved((
-                            best_solution.0,
-                            best_solution.1,
-                        ))).unwrap();
+                        self.job_results
+                            .blocking_send(SolverResult::Solved((best_solution.0, best_solution.1)))
+                            .unwrap();
                     }
                 }
             }

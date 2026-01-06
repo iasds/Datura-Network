@@ -1,6 +1,6 @@
 use crate::consts::*;
-use crate::solver::worker::{Worker, WorkerState};
 use crate::solver::utils::get_flags;
+use crate::solver::worker::{Worker, WorkerState};
 use randomx_rs::*;
 use std::cell::UnsafeCell;
 use std::cmp::min;
@@ -19,8 +19,6 @@ pub mod utils;
 mod worker;
 pub use errors::SolverError;
 pub use models::*;
-
-
 
 #[derive(Debug)]
 pub struct SharedDataset {
@@ -211,12 +209,18 @@ impl Solver {
                     //verification job, only one thread required
                     //always give work to the worker who has been working the longest (round robin)
                     while deadline > (Instant::now() + VERIFY_USUAL_DURATION).into() {
-                        if let Some(work_allocation) = w_chans.iter().find(|w| w.available.load(Ordering::Acquire)){
-                            work_allocation.job_channel.send(solverjob.clone()).await.unwrap();
+                        if let Some(work_allocation) =
+                            w_chans.iter().find(|w| w.available.load(Ordering::Acquire))
+                        {
+                            work_allocation
+                                .job_channel
+                                .send(solverjob.clone())
+                                .await
+                                .unwrap();
                             break;
-                        } 
-                            //wait for the longest possible time a verify job can take and try
-                            //again
+                        }
+                        //wait for the longest possible time a verify job can take and try
+                        //again
                         sleep(VERIFY_USUAL_DURATION).await;
                     }
                 }

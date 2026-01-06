@@ -1,8 +1,6 @@
-use super::models::*;
-use super::utils::*;
-use crate::solver::SolverError;
 use crate::consts::*;
 use crate::solver::worker::{Worker, WorkerState};
+use crate::solver::utils::get_flags;
 use randomx_rs::*;
 use std::cell::UnsafeCell;
 use std::cmp::min;
@@ -14,6 +12,15 @@ use tokio::sync::RwLock;
 use tokio::sync::mpsc;
 use tokio::task;
 use tokio::time::{Instant, sleep};
+
+mod errors;
+mod models;
+pub mod utils;
+mod worker;
+pub use errors::SolverError;
+pub use models::*;
+
+
 
 #[derive(Debug)]
 pub struct SharedDataset {

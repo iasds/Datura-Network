@@ -2,8 +2,6 @@ use super::*;
 use crate::solver::SolverJob;
 use crate::solver::{SharedCache, SharedDataset};
 use crate::solver::utils::*;
-use crate::solver::*;
-use randomx_rs::*;
 use std::cell::UnsafeCell;
 use std::sync::{
     Arc,
@@ -12,6 +10,10 @@ use std::sync::{
 use std::time::Instant;
 use tokio::sync::RwLock;
 use tokio::sync::mpsc;
+
+
+mod errors;
+pub use errors::*;
 
 pub struct Worker {
     flags: RandomXFlag,

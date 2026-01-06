@@ -57,19 +57,12 @@ pub fn get_difficulty(hex_le: &str) -> Result<u64, String> {
     let max_target = (BigUint::one() << 256) - BigUint::one();
     let difficulty: BigUint = &max_target / target;
 
-    Ok(difficulty
+    difficulty
         .try_into()
-        .map_err(|_| "difficulty does not fit in u64".to_string())?)
-}
-
-pub fn difficulty_to_target(difficulty: u64) -> String {
-    let max_target = (BigUint::one() << 256) - BigUint::one();
-    let target: BigUint = &max_target / difficulty;
-    hex::encode(&target.to_bytes_le())
+        .map_err(|_| "difficulty does not fit in u64".to_string())
 }
 
 mod tests {
-    use super::*;
     #[test]
     pub fn test_diff_to_target() {
         println!("diff to target for min: {}",difficulty_to_target(1));

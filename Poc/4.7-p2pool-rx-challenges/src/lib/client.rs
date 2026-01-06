@@ -1,5 +1,3 @@
-use super::errors::*;
-use super::models::*;
 use crate::consts;
 use crate::solver::*;
 use crate::solver::utils::get_difficulty;
@@ -13,6 +11,13 @@ use tokio::net::TcpStream;
 use tokio::sync::{RwLock, mpsc};
 use tokio::task::spawn;
 use tokio::time::{Duration, sleep};
+
+mod errors;
+mod models;
+pub use errors::*;
+pub use models::*;
+
+
 
 /// Client for connecting to p2pool/xmrig proxy and retrieve jobs for making
 /// datura proof of work

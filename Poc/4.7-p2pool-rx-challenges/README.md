@@ -80,3 +80,21 @@ Point your browser to the crate doc
 ~~~
 firefox result/doc/xmr_pow_challenge/index.html
 ~~~
+
+# Conclusion
+
+This POC experimented with the following idea: in order to create useful proof of work, why not take them from p2pool jobs? The main difficulty encountered was that p2pool jobs, even from nano pool, are incredibly difficult to solve in a very short time (which is expected), given that for the project a client would need to be able to connect in a few seconds at most, having them spend a day or more (depending on their hashrate) solving PoW wouldn't be advisable.
+
+
+Instead of doing that, this PoC creates essentially a Stratum Proxy, like running an xmrig-proxy. For the demo the consts showcase the lowest possible difficulty.
+
+## How difficulty and work relate
+
+To find a PoW satisfying a specific difficulty takes an amount of time at a fixed hashrate proportional to said difficulty. Mining for oneself (lottery mining) takes usually a long time before bringing in a reward, pool mining uses a share mechanism for this. One miner mines against a pool difficulty (which is lower than the network's) and sends upstream shares that satisfy the pool's difficulty target. Most of the time those shares aren't good enough to satisfy the network target but they show that the client worked and deserves a part of the reward should one block be found by the pool.
+
+In the present case the PoC reproduces this mechanism and drastically scales it, each node runs its own sub-pool of the p2pool nano (or mini or main depending on what chain you are running against) and each PoW represents the node asking from other networks participants for a share.
+
+Most of the time, shares submitted back for PoWs are too low difficulty to even qualify as p2pool shares, but they are quickly calculated and their difficulty scaling will allow for market effects (higher load: higher difficulty, more profitable for the running node).
+
+
+Different configurations are supported, light mode (slow, perfect for low-power mining, 256Mb of memory consumption), fast mode (2Gb required, faster mining) and complete async and parallelism are supported for easier integration. API is built to allow the user to choose how many threads to run and use them efficiently in an async manner.

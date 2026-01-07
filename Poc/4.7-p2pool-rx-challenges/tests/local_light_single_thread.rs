@@ -22,19 +22,19 @@ async fn run_single_thread_light_10_pows() {
 
     println!("creating client for local pow gen");
 
-    let local_client = Client::new(None, None)
-        .await
-        .unwrap();
+    let local_client = Client::new(None, None).await.unwrap();
     spawn(Client::start(local_client.clone()));
 
-    println!("solving jobs as fast as we can (each . is a new job, is $ is a valid solution produced");
+    println!(
+        "solving jobs as fast as we can (each . is a new job, is $ is a valid solution produced"
+    );
     for _ in 0..10 {
         let _now = Instant::now();
         let job = Client::get_solver_job(local_client.clone()).await;
         print!(".");
         solver_input_sender.send(job.clone()).await.unwrap();
         if let Some(SolverResult::Solved((pow, solution))) = solver_output_receiver.recv().await {
-                    print!("$");
+            print!("$");
         }
     }
 }

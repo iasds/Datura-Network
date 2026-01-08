@@ -1,6 +1,7 @@
 use proptest::prelude::*
+use proptest::any;
 use uuid::Uuid;
-use std::cmp::{Ord,Ordering};
+use std::cmp::{PartialOrd,Ordering};
 use std::time::Instant;
 
 pub struct Bid {
@@ -25,24 +26,37 @@ pub enum BidStatus {
 }
 
 impl Bid {
-    pub fn new(unit_price: u64, amount: u64) {
+    pub fn new(unit_price: u64, amount: u64) -> Self {
         Bid {
             unit_price,
             amount,
             id: Uuid::new_v4(),
             date: Instant::now(),
             status: BidStatus::New,
+        }
     }
 }
 
-impl Ord for Bid {
+impl PartialEq for Bid {
+       // Required method
+    fn eq(&self, other: &Self) -> bool {
+        self.unit_price == other.unit_price && self.date == other.date
+    }
+
+    // Provided method
+    fn ne(&self, other: &Self) -> bool {
+        self.unit_price != other.unit_price && self.date != other.date
+    }
+}
+
+impl PartialOrd for Bid {
         // Required method
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         if self.unit_price == other.unit_price {
-            return Some(self.date.cmp(other.date));
+            return Some(self.date.cmp(&other.date));
         }
         else {
-            Some(self.unit_price.cmp(other.unit_price))
+            Some(self.unit_price.cmp(&other.unit_price))
         }
     }
 
@@ -76,7 +90,7 @@ prop_compose! {
 
 proptest! {
     #[test]
-    fn test_orderbook(bid in arb_bid(),mut book in arb_orderbook()) {
+    fn test_orderbook()(bid in arb_bid(),mut book in arb_orderbook()) {
         println!("bad");
         let result = book.record_bid(bid);
 

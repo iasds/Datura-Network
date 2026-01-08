@@ -1,4 +1,7 @@
-mod tests;
+mod errors;
+use errors::*;
+mod bid;
+use bid::*;
 
 pub struct OrderBook {
     pub price_floor: u64,

@@ -19,16 +19,20 @@
       system:
 
       let
-        toolchain = fenix.packages.${system}.complete.toolchain;
+        toolchain = fenix.packages.${system}.stable.toolchain;
         pkgs = nixpkgs.legacyPackages.${system};
+        platform = pkgs.makeRustPlatform {
+          cargo = toolchain;
+          rustc = toolchain;
+        };
       in
       {
         packages = {
           default =
 
-          pkgs.rustPlatform.buildRustPackage
+             platform.buildRustPackage
             {
-              pname = "package";
+              pname = "variable_pricing";
               nativeBuildInputs = with pkgs; [cmake ];
               buildInputs = with pkgs; [   stdenv.cc.cc.lib ];
               version = "0.1.0";
@@ -37,7 +41,7 @@
 
               cargoLock.lockFile = ./Cargo.lock;
             };
-            doc = pkgs.rustPlatform.buildRustPackage {
+            doc = platform.buildRustPackage {
               name = "package-doc";
               dontCheck = true;
               dontInstall = true;
@@ -53,7 +57,7 @@
         devShells = {
           default = pkgs.mkShell {
             buildInputs = [
-              (fenix.packages.${system}.complete.withComponents [
+              (fenix.packages.${system}.stable.withComponents [
                 "cargo"
                 "clippy"
                 "rust-src"

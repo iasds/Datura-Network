@@ -1,9 +1,6 @@
-use super::order_book::OrderBook;
-
 pub struct ResourceManager {
     total_available: u64,
     total_allocated: u64,
-    order_book: OrderBook,
 }
 
 impl ResourceManager {
@@ -11,7 +8,6 @@ impl ResourceManager {
         ResourceManager {
             total_available,
             total_allocated: 0,
-            order_book: OrderBook::new(),
         }
     }
 }

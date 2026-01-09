@@ -17,12 +17,14 @@ impl ResourceManager {
     pub fn new(total_available: u64, minimum_block_size: u64) -> Self {
         let unit_size = max(total_available / TOTAL_UNITS, minimum_block_size);
         ResourceManager {
-
             total_available,
             total_allocated: 0,
             total_units : total_available/unit_size,
             unit_size,
         }
+    }
+    pub fn allocate(work_done: &Vec<WorkReport>) -> Vec<Allocation> {
+
     }
 }
 

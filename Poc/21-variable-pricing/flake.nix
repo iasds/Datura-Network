@@ -19,7 +19,14 @@
       system:
 
       let
-        toolchain = fenix.packages.${system}.stable.toolchain;
+        target = "aarch64-unknown-linux-musl";
+        toolchain =
+          with fenix.packages.${system};
+          combine [
+            stable.cargo
+            stable.rustc
+            targets.${target}.stable.rust-std
+          ];
         pkgs = nixpkgs.legacyPackages.${system};
         platform = pkgs.makeRustPlatform {
           cargo = toolchain;
@@ -30,30 +37,29 @@
         packages = {
           default =
 
-             platform.buildRustPackage
-            {
+            platform.buildRustPackage {
               pname = "variable_pricing";
-              nativeBuildInputs = with pkgs; [cmake ];
-              buildInputs = with pkgs; [   stdenv.cc.cc.lib ];
+              nativeBuildInputs = with pkgs; [ cmake ];
+              buildInputs = with pkgs; [ stdenv.cc.cc.lib ];
               version = "0.1.0";
 
               src = ./.;
 
               cargoLock.lockFile = ./Cargo.lock;
             };
-            doc = platform.buildRustPackage {
-              name = "package-doc";
-              dontCheck = true;
-              dontInstall = true;
-              nativeBuildInputs = with pkgs; [cmake ];
-              cargoLock.lockFile = ./Cargo.lock;
-              src = ./.;
-              buildPhase=  ''
-                mkdir -p $out
-                cargo doc --offline
-                cp -a target/doc $out/'';
-            };
+          doc = platform.buildRustPackage {
+            name = "package-doc";
+            dontCheck = true;
+            dontInstall = true;
+            nativeBuildInputs = with pkgs; [ cmake ];
+            cargoLock.lockFile = ./Cargo.lock;
+            src = ./.;
+            buildPhase = ''
+              mkdir -p $out
+              cargo doc --offline
+              cp -a target/doc $out/'';
           };
+        };
         devShells = {
           default = pkgs.mkShell {
             buildInputs = [

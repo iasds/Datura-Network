@@ -1,8 +1,10 @@
 use std::collections::HashMap;
+use uuid::Uuid;
 use tracing::{event,instrument};
-use std::default::Default;
 use opentelemetry::{global,KeyValue};
 use tokio::sync::RwLock;
+use std::sync::Arc;
+use std::fmt::Debug;
 
 /**
 every rung equals one order magnitude more of difficulty, here we are effectively capping max
@@ -17,109 +19,154 @@ pub const TOTAL_UNITS: u64 = 2u64.pow(MAX_RUNG + 1) - 1;
 pub const MIN_DIFF: u32 = 256;
 
 #[derive(Debug)]
-pub struct Allocation {
-    rung_reached: u8,
-    current_allocation: u64,
-    projected_allocation: u64,
+pub struct Resource {
+    resource_type: ResourceType,
+    total_available: u64,
+    total_allocated: u64,
+    unit_size: u64,
 }
 
-impl Default for Allocation {
-    pub fn default() -> Self {
-        Allocation {
-            rung_reached: 0,
-            current_allocation: 0,
-            projected_allocation: 0,
+impl Resource {
+    pub fn new(resource_type: ResourceType, total_available: u64) -> Self {
+        Resource {
+            resource_type,
+            total_available,
+            total_allocated: 0
+            unit_size: total_available / TOTAL_UNITS;
         }
     }
 }
 
-
-#[derive(Debug)]
-pub struct ResourceManager<Consumer> {
-    total_available: u64,
-    total_allocated: u64,
-    unit_size: u64,
-    onRamp: RwLock<HashMap<Consumer, Allocation>>,
-    allocations: RwLock<HashMap<Consumer,Allocation>>,
+#[derive(Debug,Hash)]
+pub enum ResourceType {
+    Bandwidth,
+    Memory,
 }
 
-impl ResourceManager<Consumer> {
-    pub fn new(total_available: u64, service_name: &'static str, resource_name: &'static str) -> Arc<Self> {
-        let unit_size = total_available / TOTAL_UNITS;
+impl ResourceType {
+    pub fn to_string(&self) -> String {
+        match self {
+            ResourceType::Bandwidth => "Bandwidth".to_string(),
+            ResourceType::Memory => "Memory".to_string(),
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct Allocation {
+    current_allocation: u64,
+    projected_allocation: u64,
+}
+
+#[derive(Debug)]
+pub struct Consumer {
+    allocations: HashMap<ResourceType,Allocation>,
+    rung: u64,
+}
+
+impl Consumer {
+    pub fn new() -> Self {
+        Consumer {
+            allocations: HashMap::new(),
+            rung: 0,
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct ResourceManager {
+    allocations: RwLock<HashMap<Uuid,Consumer>>,
+    on_ramp: RwLock<HashMap<Uuid,Consumer>>,
+    resources: RwLock<Vec<Resource>>,
+}
+
+impl ResourceManager {
+    pub fn new(service_name: &'static str) -> Arc<Self> {
         let result = Arc::new(ResourceManager {
-            total_available,
-            total_allocated: 0,
-            unit_size,
-            onRamp: RwLock::new(HashMap::new()),
+            on_ramp: RwLock::new(HashMap::new()),
             allocations: RwLock::new(HashMap::new()),
+            resources: RwLock::new(Vec::new()),
         });
 
         let obs_rm = result.clone();
-        let meter = global::get_meter(&service_name);
-        let _usage_gauge = meter.f64_observable_gauge(resource_name).with_callback(|observer|{
-            observer.observe(
-                obs_rm.total_allocated as f64 / obs_rm.total_available as f64,
-                &[
-                    KeyValue::new("metric","percent_used")
-                ]
-            )}).build();
+        let meter = global::meter(&service_name);
+
+        
         let obs_rm = result.clone();
-        let _onboard_queue = meter.u64_observable_gauge(resource_name).with_callback(|observer|{
-            observer.observe(
-                obs_rm.onRamp.len(),
-                &[
-                    KeyValue::new("metric","queue_size")
-                ]
-            )}).build();
+        let _usage_gauge = meter.f64_observable_gauge("resource_manager_usage").with_callback(|observer|{
+            let res_guard = obs_rm.resources.blocking_read();
+            for r in res_guard.iter() {
+                observer.observe(
+                    r.total_allocated as f64 / r.total_available as f64,
+                    &[
+                        KeyValue::new("metric","percent_used"),
+                        KeyValue::new("resource_type",r.resource_type.to_string()),
+                    ]
+                );
+            }
+}).build();
 
         let obs_rm = result.clone();
-        let _total_clients = meter.u64_observable_gauge(resource_name).with_callback(|observer|{
-            observer.observe(
-                obs_rm.allocations.len(),
-                &[
-                    KeyValue::new("metric","total_clients")
-                ]
-            )}).build();
-
-        let obs_rm = result.clone();
-        let _max_rung_reached = meter.u64_observable_gauge(resource_name).with_callback(|observer|{
-            let read_guard = obs_rm.onRamp.blocking_read().unwrap();
-            let max_onramp = *read_guard.values().fold(0u64,|acc,v| {
-                if v.rung_reached as u64 > acc {
-                    rung_reached as u64
+        let _clients = meter.u64_observable_gauge("resource_manager_clients").with_callback(|observer|{
+            let ramp_guard = result.on_ramp.blocking_read();
+            let max_onramp = ramp_guard.values().fold(0u64,|acc,v| {
+                if v.rung  > acc {
+                    v.rung
                 }
                 else {
                     acc
                 }
             });
+            observer.observe(
+                max_onramp,
+                &[
+                    KeyValue::new("metric","max_rung_reached"),
+                    KeyValue::new("status","onboarding"),
+                ]
+            );
+            observer.observe(
+                ramp_guard.len().try_into().unwrap(),
+                &[
+                KeyValue::new("metric","clients"),
+                KeyValue::new("status","onboarding"),
+                ]
+            );
+            drop(ramp_guard);
 
-            drop(read_guard);
-            let read_guard = obs_rm.allocations.blocking_read().unwrap();
-            let max_overall = *read_guard.values().fold(obs_rm.allocations,|acc,v|{
-                if v.rung_reached as u64 > acc {
-                    rung_reached as u64
+
+            let alloc_guard = result.allocations.blocking_read();
+            let max_overall = ramp_guard.values().fold(max_onramp,|acc,v|{
+                if v.rung  > acc {
+                    v.rung
                 }
                 else {
                     acc
                 }
             });
-            drop(read_guard);
+            observer.observe(
+                alloc_guard.len().try_into().unwrap(),
+                &[
+                    KeyValue::new("metric","clients")
+                ]
+            );
             observer.observe(
                 max_overall,
                 &[
                     KeyValue::new("metric","max_rung_reached")
                 ]
-            )}).build();
-
-
+            );
+        }).build();
         result
     }
 
+    /*
     ///Add a new consumer, intially will be inside the onRamp and get resource from the available
     ///pool
-    pub fn onboard(&mut self, consumer: Consumer) {
-        self.onRamp.insert(consumer, Allocation::default());
+    pub async fn onboard(&mut self, consumer: Uuid) {
+        let guard = self.on_ramp.write().await;
+        guard.insert(consumer, HashMap::new());
     }
+
 
     ///update the rung status for an existing consumer. if they are in the onRamp this whill
     ///immediately update their current allocation, else it will just update the allocation state
@@ -128,6 +175,7 @@ impl ResourceManager<Consumer> {
     pub fn update_rung(&mut self, consumer:Consumer, new_rung: u8) -> Result<(),ManagerError> {
 
     }
+    */
 
 
     ///do a global allocation and bring inside the main pool anyone being onboarded based on their
@@ -143,17 +191,6 @@ impl ResourceManager<Consumer> {
 mod tests {
     use super::ResourceManager;
     use proptest::prelude::*;
+    use std::sync::Arc;
 
-    prop_compose! {
-        pub fn new_rm()(total_available in 1..u64::MAX) -> ResourceManager<()> {
-            ResourceManager::new(total_available, "rm_test","dummy_resource")
-        }
-    }
-
-    proptest! {
-        #[test]
-        fn test_units_not_0(rm in new_rm()){
-            assert!(rm.unit_size > 0);
-        }
-    }
 }

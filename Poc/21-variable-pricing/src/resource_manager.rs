@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use tracing::{event,instrument};
 use std::default::Default;
 use opentelemetry::{global,KeyValue};
+use tokio::sync::RwLock;
 
 /**
 every rung equals one order magnitude more of difficulty, here we are effectively capping max
@@ -38,8 +39,8 @@ pub struct ResourceManager<Consumer> {
     total_available: u64,
     total_allocated: u64,
     unit_size: u64,
-    onRamp: HashMap<Consumer, Allocation>,
-    allocations: HashMap<Consumer,Allocation>,
+    onRamp: RwLock<HashMap<Consumer, Allocation>>,
+    allocations: RwLock<HashMap<Consumer,Allocation>>,
 }
 
 impl ResourceManager<Consumer> {
@@ -49,19 +50,68 @@ impl ResourceManager<Consumer> {
             total_available,
             total_allocated: 0,
             unit_size,
-            onRamp: HashMap::new(),
-            allocations: HashMap::new(),
+            onRamp: RwLock::new(HashMap::new()),
+            allocations: RwLock::new(HashMap::new()),
         });
 
         let obs_rm = result.clone();
         let meter = global::get_meter(&service_name);
-        let usage_gauge = meter.f64_observable_gauge(resource_name).with_callback(|observer|{
+        let _usage_gauge = meter.f64_observable_gauge(resource_name).with_callback(|observer|{
             observer.observe(
                 obs_rm.total_allocated as f64 / obs_rm.total_available as f64,
                 &[
-                    KeyValue::new("percent_allocated",resource_name)
+                    KeyValue::new("metric","percent_used")
                 ]
             )}).build();
+        let obs_rm = result.clone();
+        let _onboard_queue = meter.u64_observable_gauge(resource_name).with_callback(|observer|{
+            observer.observe(
+                obs_rm.onRamp.len(),
+                &[
+                    KeyValue::new("metric","queue_size")
+                ]
+            )}).build();
+
+        let obs_rm = result.clone();
+        let _total_clients = meter.u64_observable_gauge(resource_name).with_callback(|observer|{
+            observer.observe(
+                obs_rm.allocations.len(),
+                &[
+                    KeyValue::new("metric","total_clients")
+                ]
+            )}).build();
+
+        let obs_rm = result.clone();
+        let _max_rung_reached = meter.u64_observable_gauge(resource_name).with_callback(|observer|{
+            let read_guard = obs_rm.onRamp.blocking_read().unwrap();
+            let max_onramp = *read_guard.values().fold(0u64,|acc,v| {
+                if v.rung_reached as u64 > acc {
+                    rung_reached as u64
+                }
+                else {
+                    acc
+                }
+            });
+
+            drop(read_guard);
+            let read_guard = obs_rm.allocations.blocking_read().unwrap();
+            let max_overall = *read_guard.values().fold(obs_rm.allocations,|acc,v|{
+                if v.rung_reached as u64 > acc {
+                    rung_reached as u64
+                }
+                else {
+                    acc
+                }
+            });
+            drop(read_guard);
+            observer.observe(
+                max_overall,
+                &[
+                    KeyValue::new("metric","max_rung_reached")
+                ]
+            )}).build();
+
+
         result
     }
 

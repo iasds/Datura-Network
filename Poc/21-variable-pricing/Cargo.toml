@@ -10,5 +10,6 @@ path = "src/lib.rs"
 proptest = "1.9.0"
 
 [dependencies]
+opentelemetry = "0.31.0"
 thiserror = "2.0.17"
 tracing = "0.1.44"

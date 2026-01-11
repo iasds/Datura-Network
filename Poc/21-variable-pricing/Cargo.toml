@@ -12,5 +12,6 @@ proptest = "1.9.0"
 [dependencies]
 opentelemetry = "0.31.0"
 thiserror = "2.0.17"
-tokio = "1.49.0"
+tokio = { version = "1.49.0", features = ["full"]}
 tracing = "0.1.44"
+uuid = {version ="1.19.0", features=  ["v4"]}

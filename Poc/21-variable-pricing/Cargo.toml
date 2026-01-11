@@ -11,3 +11,4 @@ proptest = "1.9.0"
 
 [dependencies]
 thiserror = "2.0.17"
+tracing = "0.1.44"

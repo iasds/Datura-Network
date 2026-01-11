@@ -5,73 +5,16 @@ use opentelemetry::{global,KeyValue};
 use tokio::sync::RwLock;
 use std::sync::Arc;
 use std::fmt::Debug;
+use crate::consts;
 
-/**
-every rung equals one order magnitude more of difficulty, here we are effectively capping max
-at 54 bits targets, the higher the more units will be created but the hardest it will be to reach
-**/
-pub const MAX_RUNG: u32 = 10;
+mod resource;
+use resource::*;
+
+mod consumer;
+use consumer::*;
 
 //total unit is calculated based on the maximum number of reachable rungs
-pub const TOTAL_UNITS: u64 = 2u64.pow(MAX_RUNG + 1) - 1;
-
-///Minimum diff is high enough to incur some work
-pub const MIN_DIFF: u32 = 256;
-
-#[derive(Debug)]
-pub struct Resource {
-    resource_type: ResourceType,
-    total_available: u64,
-    total_allocated: u64,
-    unit_size: u64,
-}
-
-impl Resource {
-    pub fn new(resource_type: ResourceType, total_available: u64) -> Self {
-        Resource {
-            resource_type,
-            total_available,
-            total_allocated: 0
-            unit_size: total_available / TOTAL_UNITS;
-        }
-    }
-}
-
-#[derive(Debug,Hash)]
-pub enum ResourceType {
-    Bandwidth,
-    Memory,
-}
-
-impl ResourceType {
-    pub fn to_string(&self) -> String {
-        match self {
-            ResourceType::Bandwidth => "Bandwidth".to_string(),
-            ResourceType::Memory => "Memory".to_string(),
-        }
-    }
-}
-
-#[derive(Debug)]
-pub struct Allocation {
-    current_allocation: u64,
-    projected_allocation: u64,
-}
-
-#[derive(Debug)]
-pub struct Consumer {
-    allocations: HashMap<ResourceType,Allocation>,
-    rung: u64,
-}
-
-impl Consumer {
-    pub fn new() -> Self {
-        Consumer {
-            allocations: HashMap::new(),
-            rung: 0,
-        }
-    }
-}
+const TOTAL_UNITS: u64 = 2u64.pow(consts::MAX_RUNG + 1) - 1;
 
 #[derive(Debug)]
 pub struct ResourceManager {
@@ -88,12 +31,11 @@ impl ResourceManager {
             resources: RwLock::new(Vec::new()),
         });
 
-        let obs_rm = result.clone();
         let meter = global::meter(&service_name);
 
         
         let obs_rm = result.clone();
-        let _usage_gauge = meter.f64_observable_gauge("resource_manager_usage").with_callback(|observer|{
+        let _usage_gauge = meter.f64_observable_gauge("resource_manager_usage").with_callback(move |observer|{
             let res_guard = obs_rm.resources.blocking_read();
             for r in res_guard.iter() {
                 observer.observe(
@@ -107,8 +49,8 @@ impl ResourceManager {
 }).build();
 
         let obs_rm = result.clone();
-        let _clients = meter.u64_observable_gauge("resource_manager_clients").with_callback(|observer|{
-            let ramp_guard = result.on_ramp.blocking_read();
+        let _clients = meter.u64_observable_gauge("resource_manager_clients").with_callback(move |observer|{
+            let ramp_guard = obs_rm.on_ramp.blocking_read();
             let max_onramp = ramp_guard.values().fold(0u64,|acc,v| {
                 if v.rung  > acc {
                     v.rung
@@ -134,8 +76,8 @@ impl ResourceManager {
             drop(ramp_guard);
 
 
-            let alloc_guard = result.allocations.blocking_read();
-            let max_overall = ramp_guard.values().fold(max_onramp,|acc,v|{
+            let alloc_guard = obs_rm.allocations.blocking_read();
+            let max_overall = alloc_guard.values().fold(max_onramp,|acc,v|{
                 if v.rung  > acc {
                     v.rung
                 }

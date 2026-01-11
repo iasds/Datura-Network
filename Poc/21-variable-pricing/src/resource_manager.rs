@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use tracing::{event,instrument};
 use std::default::Default;
+use opentelemetry::{global,KeyValue};
 
 /**
 every rung equals one order magnitude more of difficulty, here we are effectively capping max
@@ -14,6 +15,7 @@ pub const TOTAL_UNITS: u64 = 2u64.pow(MAX_RUNG + 1) - 1;
 ///Minimum diff is high enough to incur some work
 pub const MIN_DIFF: u32 = 256;
 
+#[derive(Debug)]
 pub struct Allocation {
     rung_reached: u8,
     current_allocation: u64,
@@ -38,20 +40,29 @@ pub struct ResourceManager<Consumer> {
     unit_size: u64,
     onRamp: HashMap<Consumer, Allocation>,
     allocations: HashMap<Consumer,Allocation>,
-    state: ManagerState,
 }
 
 impl ResourceManager<Consumer> {
-    pub fn new(total_available: u64) -> Self {
-        let unit_size = total_available / consts::TOTAL_UNITS;
-        ResourceManager {
+    pub fn new(total_available: u64, service_name: &'static str, resource_name: &'static str) -> Arc<Self> {
+        let unit_size = total_available / TOTAL_UNITS;
+        let result = Arc::new(ResourceManager {
             total_available,
             total_allocated: 0,
             unit_size,
             onRamp: HashMap::new(),
             allocations: HashMap::new(),
-            state: MangerState::Onboarding,
-        }
+        });
+
+        let obs_rm = result.clone();
+        let meter = global::get_meter(&service_name);
+        let usage_gauge = meter.f64_observable_gauge(resource_name).with_callback(|observer|{
+            observer.observe(
+                obs_rm.total_allocated as f64 / obs_rm.total_available as f64,
+                &[
+                    KeyValue::new("percent_allocated",resource_name)
+                ]
+            )}).build();
+        result
     }
 
     ///Add a new consumer, intially will be inside the onRamp and get resource from the available
@@ -85,7 +96,7 @@ mod tests {
 
     prop_compose! {
         pub fn new_rm()(total_available in 1..u64::MAX) -> ResourceManager<()> {
-            ResourceManager::new(total_available)
+            ResourceManager::new(total_available, "rm_test","dummy_resource")
         }
     }
 

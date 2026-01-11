@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use uuid::Uuid;
 use tracing::{event,instrument};
 use opentelemetry::{global,KeyValue};
 use tokio::sync::RwLock;
@@ -18,8 +17,8 @@ const TOTAL_UNITS: u64 = 2u64.pow(consts::MAX_RUNG + 1) - 1;
 
 #[derive(Debug)]
 pub struct ResourceManager {
-    allocations: RwLock<HashMap<Uuid,Consumer>>,
-    on_ramp: RwLock<HashMap<Uuid,Consumer>>,
+    allocations: RwLock<HashMap<u64,Consumer>>,
+    on_ramp: RwLock<HashMap<u64,Consumer>>,
     resources: RwLock<Vec<Resource>>,
 }
 
@@ -101,29 +100,8 @@ impl ResourceManager {
         result
     }
 
-    /*
-    ///Add a new consumer, intially will be inside the onRamp and get resource from the available
-    ///pool
-    pub async fn onboard(&mut self, consumer: Uuid) {
-        let guard = self.on_ramp.write().await;
-        guard.insert(consumer, HashMap::new());
-    }
-
-
-    ///update the rung status for an existing consumer. if they are in the onRamp this whill
-    ///immediately update their current allocation, else it will just update the allocation state
-    ///for the next epoch
-    #[instrument]
-    pub fn update_rung(&mut self, consumer:Consumer, new_rung: u8) -> Result<(),ManagerError> {
-
-    }
-    */
-
-
-    ///do a global allocation and bring inside the main pool anyone being onboarded based on their
-    ///current acomplished work
-    #[instrument]
-    pub fn global_allocate(&mut self) {
+    asnc fn onboard(&mut self, c: Consumer) {
+        let ramp = self.on_ramp.read().await;
 
     }
 

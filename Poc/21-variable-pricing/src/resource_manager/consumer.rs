@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use super::resource::ResourceType;
+use tokio::sync::mpsc;
 
 #[derive(Debug)]
 pub struct Allocation {
@@ -11,14 +12,18 @@ pub struct Allocation {
 pub struct Consumer {
     pub allocations: HashMap<ResourceType,Allocation>,
     pub rung: u64,
+    pub allocation_sender: mpsc::Sender<Allocation>,
 }
 
 impl Consumer {
-    pub fn new() -> Self {
-        Consumer {
+    pub fn new() -> (Self,mpsc::Receiver<Allocation>) {
+        let (allocation_sender, receiver) = mpsc::channel();
+        (Consumer {
             allocations: HashMap::new(),
             rung: 0,
-        }
+            allocation_sender,
+            alive: AtmocBool::new(true),
+        }, receiver)
     }
 }
 

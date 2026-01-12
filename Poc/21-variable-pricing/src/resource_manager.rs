@@ -20,6 +20,8 @@ pub struct ResourceManager {
     allocations: RwLock<HashMap<u64,Consumer>>,
     on_ramp: RwLock<HashMap<u64,Consumer>>,
     resources: RwLock<Vec<Resource>>,
+    work_reports_receiver: mpsc::Receiver<WorkReport>,
+    work_reports_sender: mpsc::Sender<WorkReport>,
 }
 
 impl ResourceManager {

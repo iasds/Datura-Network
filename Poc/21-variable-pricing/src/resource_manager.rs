@@ -12,6 +12,9 @@ use resource::*;
 mod consumer;
 use consumer::*;
 
+mod messages;
+pub use messages::ResourceMessage;
+
 //total unit is calculated based on the maximum number of reachable rungs
 const TOTAL_UNITS: u64 = 2u64.pow(consts::MAX_RUNG + 1) - 1;
 
@@ -21,7 +24,7 @@ pub struct ResourceManager {
     on_ramp: RwLock<HashMap<u64,Consumer>>,
     resources: RwLock<Vec<Resource>>,
     work_reports_receiver: mpsc::Receiver<WorkReport>,
-    work_reports_sender: mpsc::Sender<WorkReport>,
+    pub work_reports_sender: mpsc::Sender<WorkReport>,
 }
 
 impl ResourceManager {
@@ -101,12 +104,6 @@ impl ResourceManager {
         }).build();
         result
     }
-
-    asnc fn onboard(&mut self, c: Consumer) {
-        let ramp = self.on_ramp.read().await;
-
-    }
-
 }
 
 #[cfg(test)]

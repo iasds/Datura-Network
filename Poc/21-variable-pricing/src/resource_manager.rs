@@ -5,6 +5,7 @@ use tokio::sync::RwLock;
 use std::sync::Arc;
 use std::fmt::Debug;
 use crate::consts;
+use tokio::time::{Instant,Duration,sleep};
 
 mod resource;
 use resource::*;
@@ -17,6 +18,8 @@ pub use messages::ResourceMessage;
 
 //total unit is calculated based on the maximum number of reachable rungs
 const TOTAL_UNITS: u64 = 2u64.pow(consts::MAX_RUNG + 1) - 1;
+const ALLOC_PROJECTION_TIME: Duration = Duration::from_secs(1);
+const ALLOCATION_TIME: Duration = Duration::from_secs(5);
 
 #[derive(Debug)]
 pub struct ResourceManager {
@@ -103,6 +106,57 @@ impl ResourceManager {
             );
         }).build();
         result
+    }
+
+    pub async fn start(this: Arc<Self>) {
+        let mut last_allocation = Instant::now();
+        let mut last_projection = Instant::now();
+        loop {
+            let allocating = Instant::now() - last_allocation >= ALLOCATION_TIME;
+
+            //map per resource type of availability
+            let mut available_resources= HashMap::new();
+            let res_guard = self.resources.read().await;
+            for r in res_guard.iter() {
+                available_resources.insert(r.resource_type,(r.total_available,r.total_available / TOTAL_UNITS));
+            }
+            drop(res_guard);
+
+            //for the on_ramp we update immediately to allocate a minimum based on the
+            //current availability
+            let mut ramp_guard = self.on_ramp.write().await;
+
+            if allocating {
+                let mut alloc_guard = self.allocations.write().await;
+                //move the on_ramp population to the main allocation pool
+                for (id, consumer) in ramp_guard.drain() {
+                    for (rtype, allocation) in consumer.iter_mut() {
+                        if let Some(mut res) = self.available_resources.get_mut(rtype) {
+                            res.total_allocated -= allocation.current_allocation;
+                        }
+                        else {
+                            panic!("allocated on_ramp resource doesn't exist");
+                        }
+                    }
+                    alloc_guard.insert(id,consumer);
+                }
+
+                let total_to_allocate = alloc_guard.iter().fold(0,|acc,(_,v)|{
+                    
+                });
+            }
+            else {
+                for (_,mut consumer) in ramp_guard.iter_mut() {
+                    for (rtype,mut allocation) in consumer.allocations.iter_mut() {
+                        let new_total = 2.pow(consumer.rung) * available_resources_unit_sizes.get(rtype).unwrap();
+                        allocation.current_allocation = new_total;
+                    }
+                }
+            }
+            
+
+            sleep(ALLOC_PROJECTION_TIME).await;
+        }
     }
 }
 

@@ -12,7 +12,6 @@ pub struct Allocation {
 pub struct Consumer {
     pub allocations: HashMap<ResourceType,Allocation>,
     pub rung: u64,
-    pub allocation_sender: mpsc::Sender<Allocation>,
     pub id: u64,
 }
 
@@ -27,4 +26,3 @@ impl Consumer {
         }, receiver)
     }
 }
-

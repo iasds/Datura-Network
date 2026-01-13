@@ -1,8 +1,7 @@
-use std::ops::Add;
 use tokio::sync::mpsc;
 use tokio::task::spawn;
-use tokio::time::{Duration, Instant, timeout};
-use xmr_pow_challenges::{Client, Solver, SolverJob, SolverMode, SolverResult, consts};
+use tokio::time::Instant;
+use xmr_pow_challenges::{Client, Solver, SolverMode, SolverResult};
 
 #[tokio::main]
 #[test]
@@ -33,7 +32,7 @@ async fn run_single_thread_light_10_pows() {
         let job = Client::get_solver_job(local_client.clone()).await;
         print!(".");
         solver_input_sender.send(job.clone()).await.unwrap();
-        if let Some(SolverResult::Solved((pow, solution))) = solver_output_receiver.recv().await {
+        if let Some(SolverResult::Valid((_pow, _solution))) = solver_output_receiver.recv().await {
             print!("$");
         }
     }

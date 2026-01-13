@@ -92,7 +92,7 @@ impl Client {
                                     drop(last);
 
                                     let difficulty = hash_to_difficulty(solution.as_slice().try_into().unwrap());
-                                    if difficulty <= last_target {
+                                    if difficulty >= last_target {
                                         println!("result difficulty: {}, target diff: {}",difficulty, last_target);
                                         let mut last_id_guard = this.last_id.write().await;
                                         *last_id_guard += 1;
@@ -111,7 +111,7 @@ impl Client {
                                                     .await.unwrap();
                                     }
                                     else {
-                                        println!("result diff is too low: {} for {}", difficulty, last_target);
+                                        println!("result diff is too low: {} below target {}", difficulty, last_target);
                                     }
                                 }
                                 else {

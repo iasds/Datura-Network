@@ -1,6 +1,6 @@
 use super::TOTAL_UNITS;
 
-#[derive(Debug,Hash,Copy)]
+#[derive(Debug, Hash, Copy, Clone, Eq, PartialEq)]
 pub enum ResourceType {
     Bandwidth,
     Memory,

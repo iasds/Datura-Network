@@ -1,28 +1,29 @@
 use std::collections::HashMap;
 use super::resource::ResourceType;
-use tokio::sync::mpsc;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Allocation {
-    current_allocation: u64,
-    projected_allocation: u64,
+    pub current_allocation: u64,
+    pub projected_allocation: u64,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Consumer {
-    pub allocations: HashMap<ResourceType,Allocation>,
-    pub rung: u64,
+    pub allocations: HashMap<ResourceType, Allocation>,
     pub id: u64,
+    pub contribution: u64,
+    pub epochs_connected: u32,
+    pub allocation: f64,
 }
 
 impl Consumer {
-    pub fn new() -> (Self,mpsc::Receiver<Allocation>) {
-        let (allocation_sender, receiver) = mpsc::channel();
-        (Consumer {
+    pub fn new(id: u64, contribution: u64, epochs_connected: u32) -> Self {
+        Consumer {
             allocations: HashMap::new(),
-            rung: 0,
-            allocation_sender,
-            alive: AtmocBool::new(true),
-        }, receiver)
+            id,
+            contribution,
+            epochs_connected,
+            allocation: 0.0,
+        }
     }
 }

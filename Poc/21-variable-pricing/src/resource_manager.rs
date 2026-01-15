@@ -107,16 +107,12 @@ impl SecureAllocationSystem {
 
 #[derive(Debug)]
 pub struct ResourceManager {
-    allocations: HashMap<u64, Consumer>,
-    on_ramp: HashMap<u64, Consumer>,
     allocation_system: SecureAllocationSystem,
 }
 
 impl ResourceManager {
     pub fn new(capacity: f64) -> Self {
         ResourceManager {
-            on_ramp: HashMap::new(),
-            allocations: HashMap::new(),
             allocation_system: SecureAllocationSystem::new(capacity),
         }
     }

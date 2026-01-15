@@ -48,7 +48,7 @@ Clients with longer connection history receive protection against displacement, 
 weak device problem while still requiring a baseline contribution level.
 
 **Minimum allocation formula:**
-```
+```text
 minimum = (tenure_epochs * 0.015) * sqrt(contribution) * reserve_scale
 ```
 

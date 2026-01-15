@@ -2,18 +2,8 @@ use std::collections::HashMap;
 use std::fmt::Debug;
 use crate::consts;
 
-mod resource;
-use resource::*;
-
 mod consumer;
-use consumer::*;
 pub use consumer::Consumer;
-
-mod messages;
-pub use messages::ResourceMessage;
-
-//total unit is calculated based on the maximum number of reachable rungs
-pub const TOTAL_UNITS: u64 = 1 << (16 + 1) - 1; // 2^17 - 1
 
 #[derive(Debug)]
 pub struct SecureAllocationSystem {
@@ -58,7 +48,7 @@ impl SecureAllocationSystem {
                 continue;
             }
 
-            let epochs = (client.epochs_connected as u32).min(self.max_tenure_epochs);
+            let epochs = client.epochs_connected.min(self.max_tenure_epochs);
             let client_reserve_rate = (epochs as f64) * self.reserve_per_epoch;
 
             // Contribution-weighted reserve
@@ -119,7 +109,6 @@ impl SecureAllocationSystem {
 pub struct ResourceManager {
     allocations: HashMap<u64, Consumer>,
     on_ramp: HashMap<u64, Consumer>,
-    resources: Vec<Resource>,
     allocation_system: SecureAllocationSystem,
 }
 
@@ -128,7 +117,6 @@ impl ResourceManager {
         ResourceManager {
             on_ramp: HashMap::new(),
             allocations: HashMap::new(),
-            resources: Vec::new(),
             allocation_system: SecureAllocationSystem::new(capacity),
         }
     }

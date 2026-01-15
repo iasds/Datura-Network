@@ -42,7 +42,7 @@ fn test_pow_verification_mock() {
     let solutions = client.generate_solutions(100000, difficulty, &mut rng);
 
     // Should have generated some solutions
-    assert!(solutions.len() > 0, "Client should generate some valid solutions");
+    assert!(!solutions.is_empty(), "Client should generate some valid solutions");
 
     // All solutions should have correct client_id
     assert!(solutions.iter().all(|s| s.client_id == 1));
@@ -53,7 +53,7 @@ fn test_pow_verification_mock() {
 
     // Total work should be sum of capped nonces
     let expected_work: u64 = solutions.iter()
-        .map(|s| (s.nonce % 1_000_000_000).min(u64::MAX))
+        .map(|s| s.nonce % 1_000_000_000)
         .fold(0u64, |acc, x| acc.saturating_add(x));
     assert_eq!(client.total_work, expected_work);
     }
@@ -105,13 +105,13 @@ fn test_pow_verification_mock() {
 
     // Contribution should be tracked (using same capping as client)
     let expected_contribution: u64 = solutions.iter()
-        .map(|s| (s.nonce % 1_000_000_000).min(u64::MAX))
+        .map(|s| s.nonce % 1_000_000_000)
         .fold(0u64, |acc, x| acc.saturating_add(x));
     assert_eq!(client.total_work, expected_contribution);
 
     // Should have some meaningful contribution
     assert!(client.total_work > 0);
-    assert!(client.solutions.len() > 0);
+    assert!(!client.solutions.is_empty());
     }
 
     #[test]
@@ -122,7 +122,7 @@ fn test_pow_verification_mock() {
     let difficulties = vec![1u32, 2u32, 3u32]; // Leading bits requirements
     let attempts = 1000000;
 
-    let mut prev_solutions = std::usize::MAX;
+    let mut prev_solutions = usize::MAX;
     for difficulty in difficulties {
         let mut client = PowClient::new(1);
         let solutions = client.generate_solutions(attempts, difficulty, &mut rng);
@@ -155,7 +155,7 @@ fn test_pow_verification_mock() {
     for epoch in 1..=3 {
         let solutions = client.generate_solutions(200000, difficulty, &mut rng);
         let epoch_work: u64 = solutions.iter()
-            .map(|s| (s.nonce % 1_000_000_000).min(u64::MAX))
+            .map(|s| s.nonce % 1_000_000_000)
             .fold(0u64, |acc, x| acc.saturating_add(x));
         total_work_accumulated = total_work_accumulated.saturating_add(epoch_work);
 
@@ -185,10 +185,10 @@ fn test_pow_verification_mock() {
 
     // Try to accumulate enough work to qualify
     let mut epochs = 0;
-    while client.total_work < (MIN_CONTRIBUTION_THRESHOLD / 100) as u64 && epochs < 100 {
+    while client.total_work < (MIN_CONTRIBUTION_THRESHOLD / 100) && epochs < 100 {
         let solutions = client.generate_solutions(500000, difficulty, &mut rng);
         let epoch_work: u64 = solutions.iter()
-            .map(|s| (s.nonce % 1_000_000_000).min(u64::MAX))
+            .map(|s| s.nonce % 1_000_000_000)
             .fold(0u64, |acc, x| acc.saturating_add(x));
         epochs += 1;
 
@@ -257,7 +257,7 @@ fn test_pow_verification_mock() {
     let mut pow_client = PowClient::new(1);
 
     // Generate enough work (scaled threshold for faster testing)
-    let target_contribution = MIN_CONTRIBUTION_THRESHOLD as u64 / 10;
+    let target_contribution = MIN_CONTRIBUTION_THRESHOLD / 10;
     let mut epochs = 0;
     while pow_client.total_work < target_contribution && epochs < 50 {
         pow_client.generate_solutions(1000000, difficulty, &mut rng);
@@ -375,9 +375,9 @@ fn test_botnet_attack_many_weak_clients() {
 
     let mut all_clients = Vec::new();
     for botnet_client in &botnet_clients {
-        all_clients.push(Consumer::new(botnet_client.id, botnet_client.total_work.min(u64::MAX), 0));
+        all_clients.push(Consumer::new(botnet_client.id, botnet_client.total_work, 0));
     }
-    all_clients.push(Consumer::new(legitimate.id, legitimate.total_work.min(u64::MAX), 5));
+    all_clients.push(Consumer::new(legitimate.id, legitimate.total_work, 5));
 
     let allocated = rm.allocate(all_clients);
 
@@ -429,9 +429,9 @@ fn test_monopoly_prevention_single_whale() {
     let mut rm = ResourceManager::new(capacity);
 
     let clients = vec![
-        Consumer::new(whale.id, whale.total_work.min(u64::MAX), 10),
-        Consumer::new(legit1.id, legit1.total_work.min(u64::MAX), 5),
-        Consumer::new(legit2.id, legit2.total_work.min(u64::MAX), 3),
+        Consumer::new(whale.id, whale.total_work, 10),
+        Consumer::new(legit1.id, legit1.total_work, 5),
+        Consumer::new(legit2.id, legit2.total_work, 3),
     ];
 
     let allocated = rm.allocate(clients);
@@ -466,7 +466,7 @@ fn test_sybil_attack_many_minimum_clients() {
 
     // Create 50 "Sybil" clients, each with exactly MIN_CONTRIBUTION_THRESHOLD
     let num_sybils = 50;
-    let threshold = MIN_CONTRIBUTION_THRESHOLD as u64;
+    let threshold = MIN_CONTRIBUTION_THRESHOLD;
 
     let mut sybil_clients = Vec::new();
 
@@ -494,7 +494,7 @@ fn test_sybil_attack_many_minimum_clients() {
 
     let consumers: Vec<Consumer> = sybil_clients
         .iter()
-        .map(|c| Consumer::new(c.id, c.total_work.min(u64::MAX), 1))
+        .map(|c| Consumer::new(c.id, c.total_work, 1))
         .collect();
 
     let allocated = rm.allocate(consumers);
@@ -539,13 +539,13 @@ fn test_combined_attack_botnet_and_whale() {
     let capacity = 1000.0;
     let mut rm = ResourceManager::new(capacity);
 
-    let mut clients = vec![Consumer::new(whale.id, whale.total_work.min(u64::MAX), 1)];
+    let mut clients = vec![Consumer::new(whale.id, whale.total_work, 1)];
 
     for botnet_client in &botnet_clients {
-        clients.push(Consumer::new(botnet_client.id, botnet_client.total_work.min(u64::MAX), 0));
+        clients.push(Consumer::new(botnet_client.id, botnet_client.total_work, 0));
     }
 
-    clients.push(Consumer::new(legit.id, legit.total_work.min(u64::MAX), 5));
+    clients.push(Consumer::new(legit.id, legit.total_work, 5));
 
     let allocated = rm.allocate(clients);
 
@@ -604,10 +604,10 @@ fn test_resilience_against_flash_flood_attack() {
 
     let mut all_clients = Vec::new();
     for nc in &normal_clients {
-        all_clients.push(Consumer::new(nc.id, nc.total_work.min(u64::MAX), 5));
+        all_clients.push(Consumer::new(nc.id, nc.total_work, 5));
     }
     for fc in &flood_clients {
-        all_clients.push(Consumer::new(fc.id, fc.total_work.min(u64::MAX), 0));
+        all_clients.push(Consumer::new(fc.id, fc.total_work, 0));
     }
 
     let allocated = rm.allocate(all_clients);

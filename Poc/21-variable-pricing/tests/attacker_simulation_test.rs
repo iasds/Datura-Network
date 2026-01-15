@@ -33,7 +33,7 @@ fn test_server_with_mixed_users_and_attackers() {
 
     // Coordinated weak attackers - 100 botnet clients BELOW qualification threshold
     // Each does minimal work (below MIN_CONTRIBUTION_THRESHOLD) trying to multiply through quantity
-    let threshold = MIN_CONTRIBUTION_THRESHOLD as u64;
+    let threshold = MIN_CONTRIBUTION_THRESHOLD;
     let mut weak_attackers = Vec::new();
     for i in 0..100 {
         let mut client = PowClient::new(1000 + i as u64);
@@ -77,19 +77,19 @@ fn test_server_with_mixed_users_and_attackers() {
 
     // Add normal users with tenure (simulating established users)
     for user in &normal_users {
-        all_clients.push(Consumer::new(user.id, user.total_work.min(u64::MAX), 5));
+        all_clients.push(Consumer::new(user.id, user.total_work, 5));
     }
 
     // Add powerful attacker with no tenure
     all_clients.push(Consumer::new(
         whale_attacker.id,
-        whale_attacker.total_work.min(u64::MAX),
+        whale_attacker.total_work,
         0,
     ));
 
     // Add weak attackers with no tenure (all unqualified)
     for attacker in &weak_attackers {
-        all_clients.push(Consumer::new(attacker.id, attacker.total_work.min(u64::MAX), 0));
+        all_clients.push(Consumer::new(attacker.id, attacker.total_work, 0));
     }
 
     let allocated = rm.allocate(all_clients);
@@ -217,8 +217,8 @@ fn test_tenure_protection_against_attackers() {
     // Allocate with established user having tenure advantage
     let mut rm = ResourceManager::new(capacity);
     let clients = vec![
-        Consumer::new(1, established.total_work.min(u64::MAX), 10), // 10 epochs tenure
-        Consumer::new(2, attacker.total_work.min(u64::MAX), 0),    // No tenure
+        Consumer::new(1, established.total_work, 10), // 10 epochs tenure
+        Consumer::new(2, attacker.total_work, 0),    // No tenure
     ];
 
     let allocated = rm.allocate(clients);
@@ -275,10 +275,10 @@ fn test_botnet_scaling_resistance() {
         }
 
         let mut rm = ResourceManager::new(capacity);
-        let mut clients = vec![Consumer::new(9999, normal.total_work.min(u64::MAX), 5)];
+        let mut clients = vec![Consumer::new(9999, normal.total_work, 5)];
 
         for attacker in &weak_attackers {
-            clients.push(Consumer::new(attacker.id, attacker.total_work.min(u64::MAX), 0));
+            clients.push(Consumer::new(attacker.id, attacker.total_work, 0));
         }
 
         let allocated = rm.allocate(clients);
@@ -353,13 +353,13 @@ fn test_combined_whale_plus_botnet_attack() {
     let mut clients = Vec::new();
 
     for user in &users {
-        clients.push(Consumer::new(user.id, user.total_work.min(u64::MAX), 3));
+        clients.push(Consumer::new(user.id, user.total_work, 3));
     }
 
-    clients.push(Consumer::new(9999, whale.total_work.min(u64::MAX), 0));
+    clients.push(Consumer::new(9999, whale.total_work, 0));
 
     for attacker in &botnet {
-        clients.push(Consumer::new(attacker.id, attacker.total_work.min(u64::MAX), 0));
+        clients.push(Consumer::new(attacker.id, attacker.total_work, 0));
     }
 
     let allocated = rm.allocate(clients);

@@ -1,9 +1,6 @@
 //! The client only tries to solve the RandomX challenge.
 use std::io::ErrorKind;
-
 use tokio::{io::AsyncWriteExt, net::TcpStream};
-
-mod pow;
 
 const CONTROL_ADDR: &str = "127.0.0.1:9978";
 

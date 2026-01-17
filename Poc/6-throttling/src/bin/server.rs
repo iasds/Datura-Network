@@ -114,7 +114,8 @@ async fn control_thread(
 #[tokio::main]
 async fn main() {
     let limiters: Arc<Mutex<HashMap<NodeID, Arc<RateLimiter>>>> = Arc::new(Mutex::new(HashMap::new()));
-    let (tx, mut rx) = mpsc::channel(4096);
+    let (tx, mut rx) =
+	mpsc::channel::<(IpAddr, [u8; 16], [u8; 8], oneshot::Sender<bool>)>(4096);
 
     tokio::select! {
 	_ = data_thread(limiters.clone()) => {},

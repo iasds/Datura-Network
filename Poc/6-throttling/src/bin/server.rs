@@ -78,7 +78,10 @@ async fn data_thread(
     }
 }
 
-async fn control_thread(tx: mpsc::Sender<(NodeID, [u8; 16], [u8; 8], oneshot::Sender<bool>)>) -> Result<(), Box<dyn Error>>  {
+async fn control_thread(
+    tx: mpsc::Sender<(NodeID, [u8; 16], [u8; 8], oneshot::Sender<bool>)>,
+    limiters: Arc<Mutex<HashMap<NodeID, Arc<RateLimiter>>>>
+) -> Result<(), Box<dyn Error>>  {
     let listener = TcpListener::bind(CONTROL_ADDR).await?;
 
     loop {
@@ -115,6 +118,6 @@ async fn main() {
 
     tokio::select! {
 	_ = data_thread(limiters.clone()) => {},
-	_ = control_thread(tx) => {},
+	_ = control_thread(tx, limiters.clone()) => {},
     };
 }

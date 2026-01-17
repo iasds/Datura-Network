@@ -17,6 +17,7 @@ const CONTROL_ADDR: &str = "127.0.0.1:9978";
 const BUFFER_SIZE: usize = 4096;
 
 const DEFAULT_BANDWIDTH: usize = 10 * 1024; // 10kb
+const VALIDATED_BANDWIDTH: usize = 1 * 1024 * 1024; // 1mb
 
 type NodeID = IpAddr;  // node are identified by their ip address
 
@@ -82,6 +83,7 @@ async fn control_thread(
 	let (mut socket, addr) = listener.accept().await.unwrap();
 	let tx = tx.clone();
 
+	let limiters = limiters.clone();
 	tokio::spawn(async move {
 	    let mut buf = [0; 8];
 
@@ -97,7 +99,19 @@ async fn control_thread(
 		    let (vm_tx, vm_rx) = oneshot::channel::<bool>();
 		    tx.send((addr.ip(), challenge, solution, vm_tx)).await.unwrap();
 		    if vm_rx.await.unwrap() {
-			todo!("blablabla randomx");
+			limiters.lock().unwrap().insert(
+			    addr.ip(),
+			    Arc::new(
+				// 1mb rate limiter
+				RateLimiter::builder()
+				    .initial(VALIDATED_BANDWIDTH)
+				    .max(VALIDATED_BANDWIDTH)
+				    .refill(VALIDATED_BANDWIDTH / 100)
+				    .interval(Duration::from_millis(10))
+				    .build()
+			    )
+			);
+			return;
 		    }
 		}
 	    }

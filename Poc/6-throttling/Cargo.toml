@@ -3,6 +3,9 @@ name = "throttling"
 version = "0.1.0"
 edition = "2024"
 
+[[bin]]
+name = "server"
+
 [dependencies]
 # another poc is already using tokio so it's probably fine.
 leaky-bucket = "1.1.2"

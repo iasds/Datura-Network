@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use std::error::Error;
 use std::net::IpAddr;
 use std::sync::{Arc, Mutex};
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, oneshot};
 
 const DATA_ADDR: &str = "127.0.0.1:9977";
 const CONTROL_ADDR: &str = "127.0.0.1:9978";
@@ -78,7 +78,7 @@ async fn data_thread(
     }
 }
 
-async fn control_thread(tx: mpsc::Sender<(NodeID, [u8; 16], [u8; 8])>) -> Result<(), Box<dyn Error>>  {
+async fn control_thread(tx: mpsc::Sender<(NodeID, [u8; 16], [u8; 8], oneshot::Sender<bool>)>) -> Result<(), Box<dyn Error>>  {
     let listener = TcpListener::bind(CONTROL_ADDR).await?;
 
     loop {
@@ -96,7 +96,12 @@ async fn control_thread(tx: mpsc::Sender<(NodeID, [u8; 16], [u8; 8])>) -> Result
 		if socket.read(&mut buf).await.unwrap() == 8 {
 		    let mut solution = [0; 8];
 		    solution.copy_from_slice(&buf[0..8]);
-		    tx.send((addr.ip(), challenge, solution)).await.unwrap();
+
+		    let (vm_tx, vm_rx) = oneshot::channel::<bool>();
+		    tx.send((addr.ip(), challenge, solution, vm_tx)).await.unwrap();
+		    if vm_rx.await.unwrap() {
+			todo!("blablabla randomx");
+		    }
 		}
 	    }
 	});

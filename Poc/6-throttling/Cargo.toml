@@ -4,3 +4,6 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+# another poc is already using tokio so it's probably fine.
+leaky-bucket = "1.1.2"
+tokio = { version = "1.49.0", features = ["full"] }

@@ -8,23 +8,15 @@ use std::net::IpAddr;
 use std::sync::{Arc, Mutex};
 use tokio::sync::{mpsc, oneshot};
 
+mod pow;
+
 const DATA_ADDR: &str = "127.0.0.1:9977";
 const CONTROL_ADDR: &str = "127.0.0.1:9978";
 const BUFFER_SIZE: usize = 4096;
 
 const DEFAULT_BANDWIDTH: usize = 10 * 1024; // 10kb
-const CHALLENGE_DIFFICULTY: u8 = 6;
 
 type NodeID = IpAddr;  // node are identified by their ip address
-
-// copied from Pow-4.
-fn create_challenge() -> [u8; 16] {
-    let mut buf = [0u8; 16];
-    getrandom::fill(&mut buf).unwrap();
-    buf[0] = CHALLENGE_DIFFICULTY & 0b111111;
-
-    buf
-}
 
 // inspired from https://github.com/tokio-rs/tokio/blob/master/examples/echo-tcp.rs
 async fn data_thread(
@@ -92,7 +84,7 @@ async fn control_thread(
 	    let mut buf = [0; 8];
 
 	    // new challenge
-	    let challenge = create_challenge();
+	    let challenge = pow::create_challenge();
 	    socket.write_all(&challenge).await.unwrap();
 
 	    loop {

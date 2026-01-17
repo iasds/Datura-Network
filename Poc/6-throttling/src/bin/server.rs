@@ -2,15 +2,19 @@ use tokio::time::Duration;
 use tokio::net::TcpListener;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use leaky_bucket::RateLimiter;
+use std::collections::HashMap;
 use std::env;
 use std::error::Error;
-use std::sync::Arc;
+use std::net::IpAddr;
+use std::sync::{Arc, Mutex};
 
 const DEFAULT_ADDR: &str = "127.0.0.1";
 const DATA_PORT: &str = "9977";
 const BUFFER_SIZE: usize = 4096;
 
 const DEFAULT_BANDWIDTH: usize = 10 * 1024; // 10kb
+
+type NodeID = IpAddr;  // node are identified by their ip address
 
 // inspired from https://github.com/tokio-rs/tokio/blob/master/examples/echo-tcp.rs
 #[tokio::main]
@@ -21,19 +25,12 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     let listener = TcpListener::bind(&addr).await?;
 
+    let limiters: Arc<Mutex<HashMap<NodeID, Arc<RateLimiter>>>> = Arc::new(Mutex::new(HashMap::new()));
+
     loop {
         let (mut socket, addr) = listener.accept().await?;
 	let mut stdout = tokio::io::stdout();
-
-	// 10kb rate limiter.
-	let limiter = Arc::new(
-	    RateLimiter::builder()
-		.initial(DEFAULT_BANDWIDTH)
-		.max(DEFAULT_BANDWIDTH)
-		.refill(DEFAULT_BANDWIDTH / 100)
-		.interval(Duration::from_millis(10))
-		.build()
-	);
+	let limiters = limiters.clone();
 
         tokio::spawn(async move {
             let mut buf = vec![0; BUFFER_SIZE];
@@ -48,8 +45,25 @@ async fn main() -> Result<(), Box<dyn Error>> {
 			// write to the standard output. if writing fails, log and exit.
                         if let Err(e) = stdout.write_all(&buf[0..n]).await {
                             eprintln!("Failed to write to socket {}: {}", addr, e);
-                            return;
-                        }
+			    return;
+			}
+			let limiter = limiters
+			    .lock()
+			    .unwrap()
+			    .entry(addr.ip())
+			    .or_insert_with(|| {
+				// 10kb rate limiter builder for current IP.
+				Arc::new(
+				    RateLimiter::builder()
+					.initial(DEFAULT_BANDWIDTH)
+					.max(DEFAULT_BANDWIDTH)
+					.refill(DEFAULT_BANDWIDTH / 100)
+					.interval(Duration::from_millis(10))
+					.build()
+				)
+			    })
+			    .clone();
+
 			limiter.acquire(n).await;
 		    }
                     Err(e) => {

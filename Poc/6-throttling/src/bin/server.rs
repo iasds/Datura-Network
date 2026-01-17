@@ -1,3 +1,4 @@
+use randomx_rs::{RandomXCache, RandomXDataset, RandomXFlag, RandomXVM};
 use tokio::time::Duration;
 use tokio::net::TcpListener;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -6,6 +7,7 @@ use std::collections::HashMap;
 use std::error::Error;
 use std::net::IpAddr;
 use std::sync::{Arc, Mutex};
+use std::thread;
 use tokio::sync::{mpsc, oneshot};
 
 mod pow;
@@ -109,8 +111,29 @@ async fn main() {
     let (tx, mut rx) =
 	mpsc::channel::<(IpAddr, [u8; 16], [u8; 8], oneshot::Sender<bool>)>(4096);
 
+    let vm_thread = thread::spawn(move || {
+
+	// initialize this with a random key
+	let seed_hash = b"1a803c1f384ff8b3cb35597b8d3364d32978e4aaa7f96ca894917b6d1d473fda";
+	let cache = RandomXCache::new(RandomXFlag::FLAG_DEFAULT, seed_hash).unwrap();
+	// let dataset = RandomXDataset::new(RandomXFlag::FLAG_DEFAULT, cache, 0).unwrap();
+	let vm = RandomXVM::new(
+	    RandomXFlag::FLAG_HARD_AES | RandomXFlag::FLAG_JIT,
+	    // RandomXFlag::FLAG_HARD_AES | RandomXFlag::FLAG_FULL_MEM | RandomXFlag::FLAG_JIT,
+	    Some(cache),
+	    None
+	).unwrap();
+
+
+	while let Some((_node_id, challenge, solution, msg)) = rx.blocking_recv() {
+	    msg.send(pow::validate_solution(&vm, challenge, solution)).unwrap();
+	}
+    });
+
     tokio::select! {
 	_ = data_thread(limiters.clone()) => {},
 	_ = control_thread(tx, limiters.clone()) => {},
     };
+
+    vm_thread.join().unwrap();
 }

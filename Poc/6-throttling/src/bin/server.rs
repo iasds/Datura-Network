@@ -127,52 +127,48 @@ async fn control_thread(
             let challenge = pow::create_challenge();
             socket.write_all(&challenge).await.unwrap();
 
-            loop {
-                if socket.read(&mut solution).await.unwrap() == 8 {
-                    let limiters_ = limiters.clone();
+            if socket.read(&mut solution).await.unwrap() == 8 {
+                let limiters_ = limiters.clone();
 
-                    let (vm_tx, vm_rx) = oneshot::channel::<bool>();
-                    tx.send((addr.ip(), challenge, solution, vm_tx))
-                        .await
-                        .unwrap();
-                    if vm_rx.await.unwrap() {
-                        limiters.lock().unwrap().insert(
-                            addr.ip(),
-                            (
-                                Arc::new(
-                                    // 1mb rate limiter
-                                    RateLimiter::builder()
-                                        .initial(VALIDATED_BANDWIDTH)
-                                        .max(VALIDATED_BANDWIDTH)
-                                        .refill(VALIDATED_BANDWIDTH / 100)
-                                        .interval(Duration::from_millis(10))
-                                        .build(),
-                                ),
-                                Some((
-                                    Arc::new(tokio::spawn(async move {
-                                        sleep(Duration::from_secs(TIME_CAP)).await;
-                                        limiters_.lock().unwrap().insert(
-                                            addr.ip(),
-                                            (
-                                                Arc::new(
-                                                    RateLimiter::builder()
-                                                        .initial(DEFAULT_BANDWIDTH)
-                                                        .max(DEFAULT_BANDWIDTH)
-                                                        .refill(DEFAULT_BANDWIDTH / 100)
-                                                        .interval(Duration::from_millis(10))
-                                                        .build(),
-                                                ),
-                                                None,
-                                            ),
-                                        );
-                                    })),
-                                    DATA_CAP,
-                                )),
+                let (vm_tx, vm_rx) = oneshot::channel::<bool>();
+                tx.send((addr.ip(), challenge, solution, vm_tx))
+                    .await
+                    .unwrap();
+                if vm_rx.await.unwrap() {
+                    limiters.lock().unwrap().insert(
+                        addr.ip(),
+                        (
+                            Arc::new(
+                                // 1mb rate limiter
+                                RateLimiter::builder()
+                                    .initial(VALIDATED_BANDWIDTH)
+                                    .max(VALIDATED_BANDWIDTH)
+                                    .refill(VALIDATED_BANDWIDTH / 100)
+                                    .interval(Duration::from_millis(10))
+                                    .build(),
                             ),
-                        );
-
-                        return;
-                    }
+                            Some((
+                                Arc::new(tokio::spawn(async move {
+                                    sleep(Duration::from_secs(TIME_CAP)).await;
+                                    limiters_.lock().unwrap().insert(
+                                        addr.ip(),
+                                        (
+                                            Arc::new(
+                                                RateLimiter::builder()
+                                                    .initial(DEFAULT_BANDWIDTH)
+                                                    .max(DEFAULT_BANDWIDTH)
+                                                    .refill(DEFAULT_BANDWIDTH / 100)
+                                                    .interval(Duration::from_millis(10))
+                                                    .build(),
+                                            ),
+                                            None,
+                                        ),
+                                    );
+                                })),
+                                DATA_CAP,
+                            )),
+                        ),
+                    );
                 }
             }
         });

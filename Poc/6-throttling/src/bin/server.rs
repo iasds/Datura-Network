@@ -143,7 +143,6 @@ async fn control_thread(
 					 limiters_.lock().unwrap().insert(
 					     addr.ip(),
 					     (Arc::new(
-						 // 1mb rate limiter
 						 RateLimiter::builder()
 						     .initial(DEFAULT_BANDWIDTH)
 						     .max(DEFAULT_BANDWIDTH)

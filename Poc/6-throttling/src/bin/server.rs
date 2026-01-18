@@ -48,7 +48,7 @@ async fn data_thread(
 			    .lock()
 			    .unwrap()
 			    .entry(addr.ip())
-			    .or_insert_with(|| {
+			    .or_insert(
 				// 10kb rate limiter builder for current IP.
 				Arc::new(
 				    RateLimiter::builder()
@@ -58,7 +58,7 @@ async fn data_thread(
 					.interval(Duration::from_millis(10))
 					.build()
 				)
-			    })
+			    )
 			    .clone();
 
 			limiter.acquire(n).await;

@@ -2,6 +2,7 @@
 use randomx_rs::RandomXVM;
 
 const CHALLENGE_DIFFICULTY: u8 = 15;
+pub const SEED_HASH = b"1a803c1f384ff8b3cb35597b8d3364d32978e4aaa7f96ca894917b6d1d473fda";
 
 pub fn create_challenge() -> [u8; 16] {
     let mut buf = [0u8; 16];

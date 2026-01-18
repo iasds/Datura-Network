@@ -18,6 +18,7 @@ const BUFFER_SIZE: usize = 8192;
 
 const DEFAULT_BANDWIDTH: usize = 10 * 1024; // 10kb
 const VALIDATED_BANDWIDTH: usize = 1 * 1024 * 1024; // 1mb
+const DATA_CAP: usize = 100 * 1024 * 1024; // 100mb
 
 type NodeID = IpAddr;  // node are identified by their ip address
 
@@ -31,6 +32,7 @@ async fn data_thread(
 	let (mut socket, addr) = listener.accept().await.unwrap();
 	let mut stdout = tokio::io::stdout();
 	let limiters = limiters.clone();
+	let max_caps: Arc<Mutex<HashMap<NodeID, usize>>> = Arc::new(Mutex::new(HashMap::new()));
 
 	tokio::spawn(async move {
 	    let mut buf = vec![0; BUFFER_SIZE];
@@ -60,6 +62,28 @@ async fn data_thread(
 				)
 			    )
 			    .clone();
+
+			if limiter.max() > DEFAULT_BANDWIDTH {
+			    let mut max_caps = max_caps.lock().unwrap();
+			    let cap = max_caps.entry(addr.ip()).or_insert(DATA_CAP);
+			    if *cap > n {
+				*cap = *cap - n;
+			    } else {
+				limiters.lock().unwrap().insert(
+				    addr.ip(),
+				    Arc::new(
+					// 1mb rate limiter
+					RateLimiter::builder()
+					    .initial(DEFAULT_BANDWIDTH)
+					    .max(DEFAULT_BANDWIDTH)
+					    .refill(DEFAULT_BANDWIDTH / 100)
+					    .interval(Duration::from_millis(10))
+					    .build()
+				    )
+				);
+				max_caps.insert(addr.ip(), DATA_CAP);
+			    }
+			}
 
 			limiter.acquire(n).await;
 		    }

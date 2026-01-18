@@ -17,7 +17,7 @@
           nativeBuildInputs = with pkgs; [ cmake ];
         };
         devShell = with pkgs; mkShell {
-          buildInputs = [ cargo rustc rustfmt pre-commit rustPackages.clippy rust-analyzer ];
+          buildInputs = [ cargo rustc rustfmt pre-commit rustPackages.clippy rust-analyzer socat pv ];
           RUST_SRC_PATH = rustPlatform.rustLibSrc;
         };
         apps.server = {

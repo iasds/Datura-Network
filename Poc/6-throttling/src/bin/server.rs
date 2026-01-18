@@ -176,12 +176,11 @@ async fn main() {
 	// initialize this with a random key
 	let seed_hash = b"1a803c1f384ff8b3cb35597b8d3364d32978e4aaa7f96ca894917b6d1d473fda";
 	let cache = RandomXCache::new(RandomXFlag::FLAG_DEFAULT, seed_hash).unwrap();
-	// let dataset = RandomXDataset::new(RandomXFlag::FLAG_DEFAULT, cache, 0).unwrap();
+	let dataset = RandomXDataset::new(RandomXFlag::FLAG_DEFAULT, cache, 0).unwrap();
 	let vm = RandomXVM::new(
-	    RandomXFlag::FLAG_HARD_AES | RandomXFlag::FLAG_JIT,
-	    // RandomXFlag::FLAG_HARD_AES | RandomXFlag::FLAG_FULL_MEM | RandomXFlag::FLAG_JIT,
-	    Some(cache),
-	    None
+	    RandomXFlag::FLAG_HARD_AES | RandomXFlag::FLAG_FULL_MEM | RandomXFlag::FLAG_JIT,
+	    None,
+	    Some(dataset)
 	).unwrap();
 
 

@@ -121,16 +121,14 @@ async fn control_thread(
 
         let limiters = limiters.clone();
         tokio::spawn(async move {
-            let mut buf = [0; 8];
+            let mut solution = [0; 8];
 
             // new challenge
             let challenge = pow::create_challenge();
             socket.write_all(&challenge).await.unwrap();
 
             loop {
-                if socket.read(&mut buf).await.unwrap() == 8 {
-                    let mut solution = [0; 8];
-                    solution.copy_from_slice(&buf[0..8]);
+                if socket.read(&mut solution).await.unwrap() == 8 {
                     let limiters_ = limiters.clone();
 
                     let (vm_tx, vm_rx) = oneshot::channel::<bool>();

@@ -22,8 +22,8 @@ async fn main() {
 
     let vm = RandomXVM::new(
         RandomXFlag::FLAG_HARD_AES | RandomXFlag::FLAG_FULL_MEM | RandomXFlag::FLAG_JIT,
-        Some(cache),
         None,
+        Some(dataset),
     )
     .unwrap();
 

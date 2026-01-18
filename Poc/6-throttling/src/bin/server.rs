@@ -21,11 +21,10 @@ const VALIDATED_BANDWIDTH: usize = 1 * 1024 * 1024; // 1mb
 const DATA_CAP: usize = 100 * 1024 * 1024; // 100mb
 
 type NodeID = IpAddr;  // node are identified by their ip address
+type NodeHashMap = Arc<Mutex<HashMap<NodeID, Arc<RateLimiter>>>>;
 
 // inspired from https://github.com/tokio-rs/tokio/blob/master/examples/echo-tcp.rs
-async fn data_thread(
-    limiters: Arc<Mutex<HashMap<NodeID, Arc<RateLimiter>>>>
-) -> Result<(), Box<dyn Error>>  {
+async fn data_thread(limiters: NodeHashMap) -> Result<(), Box<dyn Error>>  {
     let listener = TcpListener::bind(DATA_ADDR).await?;
 
     loop {
@@ -99,7 +98,7 @@ async fn data_thread(
 
 async fn control_thread(
     tx: mpsc::Sender<(NodeID, [u8; 16], [u8; 8], oneshot::Sender<bool>)>,
-    limiters: Arc<Mutex<HashMap<NodeID, Arc<RateLimiter>>>>
+    limiters: NodeHashMap
 ) -> Result<(), Box<dyn Error>>  {
     let listener = TcpListener::bind(CONTROL_ADDR).await?;
 
@@ -145,7 +144,7 @@ async fn control_thread(
 
 #[tokio::main]
 async fn main() {
-    let limiters: Arc<Mutex<HashMap<NodeID, Arc<RateLimiter>>>> = Arc::new(Mutex::new(HashMap::new()));
+    let limiters: NodeHashMap = Arc::new(Mutex::new(HashMap::new()));
     let (tx, mut rx) =
 	mpsc::channel::<(IpAddr, [u8; 16], [u8; 8], oneshot::Sender<bool>)>(4096);
 

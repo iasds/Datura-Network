@@ -59,7 +59,6 @@ async fn data_thread(limiters: NodeHashMap) -> Result<(), Box<dyn Error>> {
                                     .as_mut()
                                     .map(|(timeout, cap)| {
                                         if *cap > n {
-                                            eprintln!("{}", cap);
                                             *cap -= n;
                                             false
                                         } else {

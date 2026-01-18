@@ -1,6 +1,10 @@
 //! The client only tries to solve the RandomX challenge.
-use std::io::ErrorKind;
-use tokio::{io::AsyncWriteExt, net::TcpStream};
+use randomx_rs::{RandomXCache, RandomXDataset, RandomXFlag, RandomXVM};
+use throttling::pow;
+use tokio::{
+    io::{AsyncReadExt, AsyncWriteExt},
+    net::TcpStream,
+};
 
 const CONTROL_ADDR: &str = "127.0.0.1:9978";
 
@@ -9,21 +13,40 @@ async fn main() {
     let mut stream = TcpStream::connect(CONTROL_ADDR).await.unwrap();
     let mut solution = getrandom::u64().unwrap();
 
-    loop {
-        let bytes = solution.to_ne_bytes();
+    let cache = RandomXCache::new(RandomXFlag::FLAG_DEFAULT, pow::SEED_HASH).unwrap();
 
-        match stream.write_all(&bytes).await {
-            Ok(_) => {
+    let now = std::time::Instant::now();
+    println!("initializing dataset (only needs to be done once, at node startup)...");
+    let dataset = RandomXDataset::new(RandomXFlag::FLAG_DEFAULT, cache, 0).unwrap();
+    println!("initialized, took {:.2?}\n", now.elapsed());
+
+    let vm = RandomXVM::new(
+        RandomXFlag::FLAG_HARD_AES | RandomXFlag::FLAG_FULL_MEM | RandomXFlag::FLAG_JIT,
+        Some(cache),
+        None,
+    )
+    .unwrap();
+
+    let mut challenge = [0; 16];
+
+    match stream.read(&mut challenge).await {
+        Ok(16) => {
+            println!("received challenge");
+            while !pow::validate_solution(&vm, challenge, solution.to_ne_bytes()) {
                 solution += 1;
             }
-            Err(e) => {
-                if e.kind() == ErrorKind::ConnectionReset {
+            match stream.write_all(&solution.to_ne_bytes()).await {
+                Ok(_) => {
+                    eprintln!("{:?} {:?}", challenge, solution.to_ne_bytes());
                     println!("Challenge has been solved, and throttling lifted.");
-                } else {
+                }
+                Err(e) => {
                     eprintln!("Unexpected error: {}", e);
                 }
-                break;
             }
+        }
+        _ => {
+            eprintln!("Unexpected server behavior.");
         }
     }
 }

@@ -17,11 +17,11 @@ async fn main() {
                 solution += 1;
             }
             Err(e) => {
-		if e.kind() == ErrorKind::ConnectionReset {
-		    println!("Challenge has been solved, and throttling lifted.");
-		} else {
-		    eprintln!("Unexpected error: {}", e);
-		}
+                if e.kind() == ErrorKind::ConnectionReset {
+                    println!("Challenge has been solved, and throttling lifted.");
+                } else {
+                    eprintln!("Unexpected error: {}", e);
+                }
                 break;
             }
         }

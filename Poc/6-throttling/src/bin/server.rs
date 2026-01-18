@@ -14,7 +14,7 @@ use throttling::pow;
 
 const DATA_ADDR: &str = "127.0.0.1:9977";
 const CONTROL_ADDR: &str = "127.0.0.1:9978";
-const BUFFER_SIZE: usize = 4096;
+const BUFFER_SIZE: usize = 8192;
 
 const DEFAULT_BANDWIDTH: usize = 10 * 1024; // 10kb
 const VALIDATED_BANDWIDTH: usize = 1 * 1024 * 1024; // 1mb

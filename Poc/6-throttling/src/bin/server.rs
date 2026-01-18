@@ -21,6 +21,7 @@ const BUFFER_SIZE: usize = 8192;
 const DEFAULT_BANDWIDTH: usize = 10 * 1024; // 10kb
 const VALIDATED_BANDWIDTH: usize = 1 * 1024 * 1024; // 1mb
 const DATA_CAP: usize = 100 * 1024 * 1024; // 100mb
+const TIME_CAP: u64 = 3600; // 1h
 
 type NodeID = IpAddr;  // node are identified by their ip address
 type NodeHashMap = Arc<Mutex<HashMap<NodeID, (Arc<RateLimiter>, Option<(Arc<JoinHandle<()>>, usize)>)>>>;
@@ -138,7 +139,7 @@ async fn control_thread(
 			     Some((
 				 Arc::new(
 				     tokio::spawn(async move {
-					 sleep(Duration::from_secs(5)).await;
+					 sleep(Duration::from_secs(TIME_CAP)).await;
 					 limiters_.lock().unwrap().insert(
 					     addr.ip(),
 					     (Arc::new(

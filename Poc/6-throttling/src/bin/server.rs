@@ -1,4 +1,5 @@
 use randomx_rs::{RandomXCache, RandomXDataset, RandomXFlag, RandomXVM};
+use tokio::task::JoinHandle;
 use tokio::time::Duration;
 use tokio::net::TcpListener;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -9,6 +10,7 @@ use std::net::IpAddr;
 use std::sync::{Arc, Mutex};
 use std::thread;
 use tokio::sync::{mpsc, oneshot};
+use tokio::time::sleep;
 
 use throttling::pow;
 
@@ -21,7 +23,7 @@ const VALIDATED_BANDWIDTH: usize = 1 * 1024 * 1024; // 1mb
 const DATA_CAP: usize = 100 * 1024 * 1024; // 100mb
 
 type NodeID = IpAddr;  // node are identified by their ip address
-type NodeHashMap = Arc<Mutex<HashMap<NodeID, Arc<RateLimiter>>>>;
+type NodeHashMap = Arc<Mutex<HashMap<NodeID, (Arc<RateLimiter>, Option<(Arc<JoinHandle<()>>, usize)>)>>>;
 
 // inspired from https://github.com/tokio-rs/tokio/blob/master/examples/echo-tcp.rs
 async fn data_thread(limiters: NodeHashMap) -> Result<(), Box<dyn Error>>  {
@@ -45,20 +47,20 @@ async fn data_thread(limiters: NodeHashMap) -> Result<(), Box<dyn Error>>  {
 			    eprintln!("Failed to write to socket {}: {}", addr, e);
 			    return;
 			}
-			let limiter = limiters
+			let (limiter, _) = limiters
 			    .lock()
 			    .unwrap()
 			    .entry(addr.ip())
 			    .or_insert(
 				// 10kb rate limiter builder for current IP.
-				Arc::new(
+				(Arc::new(
 				    RateLimiter::builder()
 					.initial(DEFAULT_BANDWIDTH)
 					.max(DEFAULT_BANDWIDTH)
 					.refill(DEFAULT_BANDWIDTH / 100)
 					.interval(Duration::from_millis(10))
 					.build()
-				)
+				), None)
 			    )
 			    .clone();
 
@@ -70,7 +72,7 @@ async fn data_thread(limiters: NodeHashMap) -> Result<(), Box<dyn Error>>  {
 			    } else {
 				limiters.lock().unwrap().insert(
 				    addr.ip(),
-				    Arc::new(
+				    (Arc::new(
 					// 1mb rate limiter
 					RateLimiter::builder()
 					    .initial(DEFAULT_BANDWIDTH)
@@ -78,7 +80,7 @@ async fn data_thread(limiters: NodeHashMap) -> Result<(), Box<dyn Error>>  {
 					    .refill(DEFAULT_BANDWIDTH / 100)
 					    .interval(Duration::from_millis(10))
 					    .build()
-				    )
+				    ), None)
 				);
 				max_caps.insert(addr.ip(), DATA_CAP);
 			    }
@@ -118,22 +120,41 @@ async fn control_thread(
 		if socket.read(&mut buf).await.unwrap() == 8 {
 		    let mut solution = [0; 8];
 		    solution.copy_from_slice(&buf[0..8]);
+		    let limiters_ = limiters.clone();
 
 		    let (vm_tx, vm_rx) = oneshot::channel::<bool>();
 		    tx.send((addr.ip(), challenge, solution, vm_tx)).await.unwrap();
 		    if vm_rx.await.unwrap() {
 			limiters.lock().unwrap().insert(
 			    addr.ip(),
-			    Arc::new(
+			    (Arc::new(
 				// 1mb rate limiter
 				RateLimiter::builder()
 				    .initial(VALIDATED_BANDWIDTH)
 				    .max(VALIDATED_BANDWIDTH)
 				    .refill(VALIDATED_BANDWIDTH / 100)
 				    .interval(Duration::from_millis(10))
-				    .build()
-			    )
-			);
+				    .build()),
+			     Some((
+				 Arc::new(
+				     tokio::spawn(async move {
+					 sleep(Duration::from_secs(5)).await;
+					 limiters_.lock().unwrap().insert(
+					     addr.ip(),
+					     (Arc::new(
+						 // 1mb rate limiter
+						 RateLimiter::builder()
+						     .initial(DEFAULT_BANDWIDTH)
+						     .max(DEFAULT_BANDWIDTH)
+						     .refill(DEFAULT_BANDWIDTH / 100)
+						     .interval(Duration::from_millis(10))
+						     .build()
+					     ), None)
+					 );
+				     })),
+				 DATA_CAP
+			     ))));
+
 			return;
 		    }
 		}

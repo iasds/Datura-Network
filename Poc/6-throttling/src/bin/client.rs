@@ -31,13 +31,12 @@ async fn main() {
 
     match stream.read(&mut challenge).await {
         Ok(16) => {
-            println!("received challenge");
+            println!("Challenge received.");
             while !pow::validate_solution(&vm, challenge, solution.to_ne_bytes()) {
                 solution += 1;
             }
             match stream.write_all(&solution.to_ne_bytes()).await {
                 Ok(_) => {
-                    eprintln!("{:?} {:?}", challenge, solution.to_ne_bytes());
                     println!("Challenge has been solved, and throttling lifted.");
                 }
                 Err(e) => {

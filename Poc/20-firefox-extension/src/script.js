@@ -20,7 +20,7 @@ function route()
   browser.privacy.network.webRTCIPHandlingPolicy
     .set({value : "proxy_only"});
 
-    msg("Connected to Datura");
+  msg("Connected to Datura");
 }
 
 function revert()

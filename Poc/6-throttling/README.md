@@ -60,3 +60,16 @@ initialized, took 205.66s
 Challenge received.
 Challenge has been solved, and throttling lifted.
 ```
+
+# Conclusion
+
+This PoC builds upon Poc-4 to allow to throttle bandwidth. It uses a leaky bucket
+algorithm, to slowly allow bandwidth to recover from spikes (without having a choppy
+network).
+
+One of the big challenges was to start the RandomX VM, that can't be moved across
+threads. The best solution was to place it in its own thread. Another (positive) side
+effect of this decision is that the server can listen to connections while the dataset
+warms up (even though it can't validate bandwidth cap requests yet).
+
+In the end, this PoC has been successfully implemented as specified.

@@ -16,7 +16,7 @@ Start the server, and measure throughput. `nix run` starts the server, and `pv` 
 command-line utility for checking a pipe's bandwidth.
 
 ```bash
-nix run | pv -pa > /dev/null
+nix run | pv -pam5 > /dev/null
 ```
 
 Send data to the data port in another terminal, after the server is started. `socat` is included in the nix flake.

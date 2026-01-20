@@ -1,4 +1,4 @@
-use alloc_bandwidth::bandwidth::{NODE_RATE_LIMITER, NodeRate};
+use alloc_bandwidth::bandwidth::{NODE_RATE_LIMITER, NodeRate, difficulty};
 use std::collections::HashMap;
 use std::error::Error;
 use std::net::IpAddr;
@@ -15,8 +15,6 @@ use alloc_bandwidth::pow;
 const DATA_ADDR: &str = "127.0.0.1:9977";
 const CONTROL_ADDR: &str = "127.0.0.1:9978";
 const BUFFER_SIZE: usize = 8192;
-
-const CHALLENGE_DIFFICULTY: u8 = 15;
 
 type NodeID = IpAddr; // node are identified by their ip address
 
@@ -67,6 +65,8 @@ async fn data_thread(limiters: NodeHashMap) -> Result<(), Box<dyn Error>> {
                         };
 
                         limiter.bucket.acquire(n).await;
+                        // we don't want the scheduler to lock if we go >100%.
+                        NODE_RATE_LIMITER.lock().await.try_acquire(n);
                     }
                     Err(e) => {
                         eprintln!("Failed to read from socket {}: {}", addr, e);
@@ -102,7 +102,7 @@ async fn control_thread(
 
             match &mut limiter.rate {
                 NodeRate::Anon(challenge) => {
-                    let challenge = challenge.get(CHALLENGE_DIFFICULTY);
+                    let challenge = challenge.get(difficulty().await);
                     socket.write_all(&challenge).await.unwrap();
 
                     if socket.read(&mut solution).await.unwrap() == 8 {

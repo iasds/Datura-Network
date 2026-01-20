@@ -6,4 +6,6 @@ edition = "2024"
 [dependencies]
 getrandom = "0.3.4"
 rand = "0.9.2"
+leaky-bucket = "1.1.2"
+randomx-rs = "1.4.1"
 tokio = { version = "1.49.0", features = ["full"] }

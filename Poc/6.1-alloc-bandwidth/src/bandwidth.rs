@@ -64,7 +64,12 @@ impl NodeRateLimiter {
     }
 }
 
-    // current occupied bandwidth percentage
+/// Calculate the current difficulty, based on available bandwidth.
+///
+/// The challenge difficulty increases, following how much bandwidth is currently taken.
+/// Until reaching 90% of occupation, it stays at `NORMAL_DIFFICULTY`, then the average
+/// computing time of the solution doubles (meaning, difficulty increases of 1) for
+/// every 10% of bandwidth.
 pub async fn difficulty() -> u8 {
     let used_bandwidth = {
         let node = NODE_RATE_LIMITER.lock().await;

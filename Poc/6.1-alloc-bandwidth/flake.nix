@@ -28,6 +28,10 @@
           type = "app";
           program = "${defaultPackage}/bin/client";
         };
+        apps.benchmark = {
+          type = "app";
+          program = "${defaultPackage}/bin/benchmark";
+        };
         apps.default = apps.server;
       }
     );

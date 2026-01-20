@@ -1,4 +1,5 @@
 //! copied from Pow-4.
+use rand::Rng;
 use randomx_rs::{RandomXCache, RandomXDataset, RandomXError, RandomXFlag, RandomXVM};
 
 const CHALLENGE_DIFFICULTY: u8 = 15;
@@ -7,7 +8,7 @@ pub const SEED_HASH: &[u8; 64] =
 
 pub fn create_challenge() -> [u8; 16] {
     let mut buf = [0u8; 16];
-    getrandom::fill(&mut buf).unwrap();
+    rand::rng().fill(&mut buf);
     buf[0] = CHALLENGE_DIFFICULTY & 0b111111;
 
     buf

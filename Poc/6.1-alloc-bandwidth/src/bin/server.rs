@@ -1,5 +1,4 @@
 use leaky_bucket::RateLimiter;
-use randomx_rs::{RandomXCache, RandomXDataset, RandomXFlag, RandomXVM};
 use std::collections::HashMap;
 use std::error::Error;
 use std::net::IpAddr;
@@ -186,14 +185,7 @@ async fn main() {
     let (tx, mut rx) = mpsc::channel::<(IpAddr, [u8; 16], [u8; 8], oneshot::Sender<bool>)>(4096);
 
     let vm_thread = thread::spawn(move || {
-        let cache = RandomXCache::new(RandomXFlag::FLAG_DEFAULT, pow::SEED_HASH).unwrap();
-        let dataset = RandomXDataset::new(RandomXFlag::FLAG_DEFAULT, cache, 0).unwrap();
-        let vm = RandomXVM::new(
-            RandomXFlag::FLAG_HARD_AES | RandomXFlag::FLAG_FULL_MEM | RandomXFlag::FLAG_JIT,
-            None,
-            Some(dataset),
-        )
-        .unwrap();
+        let vm = pow::create_vm().unwrap();
 
         while let Some((_node_id, challenge, solution, msg)) = rx.blocking_recv() {
             msg.send(pow::validate_solution(&vm, challenge, solution))

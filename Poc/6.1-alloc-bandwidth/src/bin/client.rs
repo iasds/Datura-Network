@@ -1,5 +1,4 @@
 //! The client only tries to solve the RandomX challenge.
-use randomx_rs::{RandomXCache, RandomXDataset, RandomXFlag, RandomXVM};
 use alloc_bandwidth::pow;
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
@@ -13,19 +12,7 @@ async fn main() {
     let mut stream = TcpStream::connect(CONTROL_ADDR).await.unwrap();
     let mut solution = getrandom::u64().unwrap();
 
-    let cache = RandomXCache::new(RandomXFlag::FLAG_DEFAULT, pow::SEED_HASH).unwrap();
-
-    let now = std::time::Instant::now();
-    println!("initializing dataset (only needs to be done once, at node startup)...");
-    let dataset = RandomXDataset::new(RandomXFlag::FLAG_DEFAULT, cache, 0).unwrap();
-    println!("initialized, took {:.2?}\n", now.elapsed());
-
-    let vm = RandomXVM::new(
-        RandomXFlag::FLAG_HARD_AES | RandomXFlag::FLAG_FULL_MEM | RandomXFlag::FLAG_JIT,
-        None,
-        Some(dataset),
-    )
-    .unwrap();
+    let vm = pow::create_vm().unwrap();
 
     let mut challenge = [0; 16];
 

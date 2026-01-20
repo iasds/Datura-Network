@@ -86,53 +86,28 @@ async fn data_thread(limiters: NodeHashMap) -> Result<(), Box<dyn Error>> {
                             eprintln!("Failed to write to socket {}: {}", addr, e);
                             return;
                         }
-                        let (limiter, _) = limiters
+
+                        let limiter = limiters
                             .lock()
 			    .await
                             .entry(addr.ip())
-                            .and_modify(|(limiter, cancellations)| {
-                                let finished = match cancellations {
-                                    NodeRate::Auth((timeout, cap)) => {
-                                        if *cap > n {
-                                            *cap -= n;
-                                            false
-                                        } else {
-                                            timeout.abort();
-                                            true
-                                        }
-                                    }
-                                    NodeRate::Anon(()) => false,
-                                };
-
-                                if finished {
-                                    *limiter = Arc::new(
-                                        RateLimiter::builder()
-                                            .initial(ANON_BANDWIDTH)
-                                            .max(ANON_BANDWIDTH)
-                                            .refill(ANON_BANDWIDTH / 100)
-                                            .interval(Duration::from_millis(10))
-                                            .build(),
-                                    );
-                                    *cancellations = NodeRate::Anon(());
-                                }
-                            })
-                            .or_insert(
-                                // 10kb rate limiter builder for current IP.
-                                (
-                                    Arc::new(
-                                        RateLimiter::builder()
-                                            .initial(ANON_BANDWIDTH)
-                                            .max(ANON_BANDWIDTH)
-                                            .refill(ANON_BANDWIDTH / 100)
-                                            .interval(Duration::from_millis(10))
-                                            .build(),
-                                    ),
-                                    NodeRate::Anon(()),
-                                ),
-                            )
+                            .or_insert(Arc::new(Mutex::new(NodeRateLimiter::anon())))
                             .clone();
 
-                        limiter.acquire(n).await;
+			let mut limiter = limiter.lock().await;
+
+			match limiter.rate {
+			    NodeRate::Auth(timeout, cap) => {
+				if cap > n && timeout > Instant::now() {
+				    limiter.rate = NodeRate::Auth(timeout, cap - n);
+				} else {
+				    *limiter = NodeRateLimiter::anon();
+				}
+			    }
+			    NodeRate::Anon(_) => ()
+			};
+
+                        limiter.bucket.acquire(n).await;
                     }
                     Err(e) => {
                         eprintln!("Failed to read from socket {}: {}", addr, e);

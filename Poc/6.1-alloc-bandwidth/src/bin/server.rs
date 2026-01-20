@@ -7,8 +7,6 @@ use std::thread;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 use tokio::sync::{Mutex, mpsc, oneshot};
-use tokio::task::JoinHandle;
-use tokio::time::sleep;
 use tokio::time::{Duration, Instant};
 
 use alloc_bandwidth::pow;
@@ -132,54 +130,32 @@ async fn control_thread(
         let limiters = limiters.clone();
         tokio::spawn(async move {
             let mut solution = [0; 8];
+            let limiter = limiters
+                .lock()
+                .await
+                .entry(addr.ip())
+                .or_insert(Arc::new(Mutex::new(NodeRateLimiter::anon())))
+                .clone();
 
-            // new challenge
-            let challenge = pow::create_challenge();
-            socket.write_all(&challenge).await.unwrap();
+            let mut limiter = limiter.lock().await;
 
-            if socket.read(&mut solution).await.unwrap() == 8 {
-                let limiters_ = limiters.clone();
+            match limiter.rate {
+                NodeRate::Anon(()) => {
+                    // new challenge
+                    let challenge = [0u8; 16];
+                    socket.write_all(&challenge).await.unwrap();
 
-                let (vm_tx, vm_rx) = oneshot::channel::<bool>();
-                tx.send((addr.ip(), challenge, solution, vm_tx))
-                    .await
-                    .unwrap();
-                if vm_rx.await.unwrap() {
-                    limiters.lock().await.insert(
-                        addr.ip(),
-                        (
-                            Arc::new(
-                                // 1mb rate limiter
-                                RateLimiter::builder()
-                                    .initial(AUTH_BANDWIDTH)
-                                    .max(AUTH_BANDWIDTH)
-                                    .refill(AUTH_BANDWIDTH / 100)
-                                    .interval(Duration::from_millis(10))
-                                    .build(),
-                            ),
-                            NodeRate::Auth((
-                                Arc::new(tokio::spawn(async move {
-                                    sleep(Duration::from_secs(TIME_CAP)).await;
-                                    limiters_.lock().await.insert(
-                                        addr.ip(),
-                                        (
-                                            Arc::new(
-                                                RateLimiter::builder()
-                                                    .initial(ANON_BANDWIDTH)
-                                                    .max(ANON_BANDWIDTH)
-                                                    .refill(ANON_BANDWIDTH / 100)
-                                                    .interval(Duration::from_millis(10))
-                                                    .build(),
-                                            ),
-                                            NodeRate::Anon(()),
-                                        ),
-                                    );
-                                })),
-                                DATA_CAP,
-                            )),
-                        ),
-                    );
+                    if socket.read(&mut solution).await.unwrap() == 8 {
+                        let (vm_tx, vm_rx) = oneshot::channel::<bool>();
+                        tx.send((addr.ip(), challenge, solution, vm_tx))
+                            .await
+                            .unwrap();
+                        if vm_rx.await.unwrap() {
+                            *limiter = NodeRateLimiter::auth();
+                        }
+                    }
                 }
+                NodeRate::Auth(..) => (),
             }
         });
     }

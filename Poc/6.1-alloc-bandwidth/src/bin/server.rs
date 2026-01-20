@@ -18,8 +18,8 @@ const DATA_ADDR: &str = "127.0.0.1:9977";
 const CONTROL_ADDR: &str = "127.0.0.1:9978";
 const BUFFER_SIZE: usize = 8192;
 
-const DEFAULT_BANDWIDTH: usize = 10 * 1024; // 10kb
-const VALIDATED_BANDWIDTH: usize = 1024 * 1024; // 1mb
+const ANON_BANDWIDTH: usize = 10 * 1024; // 10kb
+const AUTH_BANDWIDTH: usize = 1024 * 1024; // 1mb
 const DATA_CAP: usize = 100 * 1024 * 1024; // 100mb
 const TIME_CAP: u64 = 3600; // 1h
 
@@ -77,9 +77,9 @@ async fn data_thread(limiters: NodeHashMap) -> Result<(), Box<dyn Error>> {
                                 if finished {
                                     *limiter = Arc::new(
                                         RateLimiter::builder()
-                                            .initial(DEFAULT_BANDWIDTH)
-                                            .max(DEFAULT_BANDWIDTH)
-                                            .refill(DEFAULT_BANDWIDTH / 100)
+                                            .initial(ANON_BANDWIDTH)
+                                            .max(ANON_BANDWIDTH)
+                                            .refill(ANON_BANDWIDTH / 100)
                                             .interval(Duration::from_millis(10))
                                             .build(),
                                     );
@@ -91,9 +91,9 @@ async fn data_thread(limiters: NodeHashMap) -> Result<(), Box<dyn Error>> {
                                 (
                                     Arc::new(
                                         RateLimiter::builder()
-                                            .initial(DEFAULT_BANDWIDTH)
-                                            .max(DEFAULT_BANDWIDTH)
-                                            .refill(DEFAULT_BANDWIDTH / 100)
+                                            .initial(ANON_BANDWIDTH)
+                                            .max(ANON_BANDWIDTH)
+                                            .refill(ANON_BANDWIDTH / 100)
                                             .interval(Duration::from_millis(10))
                                             .build(),
                                     ),
@@ -146,9 +146,9 @@ async fn control_thread(
                             Arc::new(
                                 // 1mb rate limiter
                                 RateLimiter::builder()
-                                    .initial(VALIDATED_BANDWIDTH)
-                                    .max(VALIDATED_BANDWIDTH)
-                                    .refill(VALIDATED_BANDWIDTH / 100)
+                                    .initial(AUTH_BANDWIDTH)
+                                    .max(AUTH_BANDWIDTH)
+                                    .refill(AUTH_BANDWIDTH / 100)
                                     .interval(Duration::from_millis(10))
                                     .build(),
                             ),
@@ -160,9 +160,9 @@ async fn control_thread(
                                         (
                                             Arc::new(
                                                 RateLimiter::builder()
-                                                    .initial(DEFAULT_BANDWIDTH)
-                                                    .max(DEFAULT_BANDWIDTH)
-                                                    .refill(DEFAULT_BANDWIDTH / 100)
+                                                    .initial(ANON_BANDWIDTH)
+                                                    .max(ANON_BANDWIDTH)
+                                                    .refill(ANON_BANDWIDTH / 100)
                                                     .interval(Duration::from_millis(10))
                                                     .build(),
                                             ),

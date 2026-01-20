@@ -24,8 +24,14 @@ const DATA_CAP: usize = 100 * 1024 * 1024; // 100mb
 const TIME_CAP: u64 = 3600; // 1h
 
 type NodeID = IpAddr; // node are identified by their ip address
-type NodeHashMap =
-    Arc<Mutex<HashMap<NodeID, (Arc<RateLimiter>, Option<(Arc<JoinHandle<()>>, usize)>)>>>;
+
+#[derive(Debug, Clone)]
+pub enum NodeRate {
+    Anon(()),
+    Auth((Arc<JoinHandle<()>>, usize)),
+}
+
+type NodeHashMap = Arc<Mutex<HashMap<NodeID, (Arc<RateLimiter>, NodeRate)>>>;
 
 // inspired from https://github.com/tokio-rs/tokio/blob/master/examples/echo-tcp.rs
 async fn data_thread(limiters: NodeHashMap) -> Result<(), Box<dyn Error>> {
@@ -55,9 +61,8 @@ async fn data_thread(limiters: NodeHashMap) -> Result<(), Box<dyn Error>> {
                             .unwrap()
                             .entry(addr.ip())
                             .and_modify(|(limiter, cancellations)| {
-                                let finished = cancellations
-                                    .as_mut()
-                                    .map(|(timeout, cap)| {
+                                let finished = match cancellations {
+                                    NodeRate::Auth((timeout, cap)) => {
                                         if *cap > n {
                                             *cap -= n;
                                             false
@@ -65,8 +70,9 @@ async fn data_thread(limiters: NodeHashMap) -> Result<(), Box<dyn Error>> {
                                             timeout.abort();
                                             true
                                         }
-                                    })
-                                    .unwrap_or(false);
+                                    }
+                                    NodeRate::Anon(()) => false,
+                                };
 
                                 if finished {
                                     *limiter = Arc::new(
@@ -77,7 +83,7 @@ async fn data_thread(limiters: NodeHashMap) -> Result<(), Box<dyn Error>> {
                                             .interval(Duration::from_millis(10))
                                             .build(),
                                     );
-                                    *cancellations = None;
+                                    *cancellations = NodeRate::Anon(());
                                 }
                             })
                             .or_insert(
@@ -91,7 +97,7 @@ async fn data_thread(limiters: NodeHashMap) -> Result<(), Box<dyn Error>> {
                                             .interval(Duration::from_millis(10))
                                             .build(),
                                     ),
-                                    None,
+                                    NodeRate::Anon(()),
                                 ),
                             )
                             .clone();
@@ -146,7 +152,7 @@ async fn control_thread(
                                     .interval(Duration::from_millis(10))
                                     .build(),
                             ),
-                            Some((
+                            NodeRate::Auth((
                                 Arc::new(tokio::spawn(async move {
                                     sleep(Duration::from_secs(TIME_CAP)).await;
                                     limiters_.lock().unwrap().insert(
@@ -160,7 +166,7 @@ async fn control_thread(
                                                     .interval(Duration::from_millis(10))
                                                     .build(),
                                             ),
-                                            None,
+                                            NodeRate::Anon(()),
                                         ),
                                     );
                                 })),

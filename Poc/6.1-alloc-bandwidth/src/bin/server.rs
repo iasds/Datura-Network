@@ -1,4 +1,4 @@
-use leaky_bucket::RateLimiter;
+use alloc_bandwidth::bandwidth::{NODE_RATE_LIMITER, NodeRate};
 use std::collections::HashMap;
 use std::error::Error;
 use std::net::IpAddr;
@@ -7,59 +7,18 @@ use std::thread;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 use tokio::sync::{Mutex, mpsc, oneshot};
-use tokio::time::{Duration, Instant};
+use tokio::time::Instant;
 
-use alloc_bandwidth::pow::{self, Challenge};
+use alloc_bandwidth::bandwidth::NodeRateLimiter;
+use alloc_bandwidth::pow;
 
 const DATA_ADDR: &str = "127.0.0.1:9977";
 const CONTROL_ADDR: &str = "127.0.0.1:9978";
 const BUFFER_SIZE: usize = 8192;
 
-const ANON_BANDWIDTH: usize = 10 * 1024; // 10kb
-const AUTH_BANDWIDTH: usize = 1024 * 1024; // 1mb
-const DATA_CAP: usize = 100 * 1024 * 1024; // 100mb
-const TIME_CAP: u64 = 1; // 1h
-
 const CHALLENGE_DIFFICULTY: u8 = 15;
 
 type NodeID = IpAddr; // node are identified by their ip address
-
-#[derive(Debug, Clone)]
-pub enum NodeRate {
-    Anon(Challenge),
-    Auth(Instant, usize),
-}
-
-pub struct NodeRateLimiter {
-    bucket: RateLimiter,
-    rate: NodeRate,
-}
-
-impl NodeRateLimiter {
-    pub fn anon() -> Self {
-        Self {
-            bucket: RateLimiter::builder()
-                .initial(ANON_BANDWIDTH)
-                .max(ANON_BANDWIDTH)
-                .refill(ANON_BANDWIDTH / 100)
-                .interval(Duration::from_millis(10))
-                .build(),
-            rate: NodeRate::Anon(Challenge::new()),
-        }
-    }
-
-    pub fn auth() -> Self {
-        Self {
-            bucket: RateLimiter::builder()
-                .initial(AUTH_BANDWIDTH)
-                .max(AUTH_BANDWIDTH)
-                .refill(AUTH_BANDWIDTH / 100)
-                .interval(Duration::from_millis(10))
-                .build(),
-            rate: NodeRate::Auth(Instant::now() + Duration::from_hours(TIME_CAP), DATA_CAP),
-        }
-    }
-}
 
 type NodeHashMap = Arc<Mutex<HashMap<NodeID, Arc<Mutex<NodeRateLimiter>>>>>;
 

@@ -70,7 +70,6 @@ p.addEventListener('change', function ()
   if (chk.checked)
   {
     browser.storage.local.set({ connected: false });
-    revert();
     chk.checked = false;
     msg("Reconnect to Datura");
   }

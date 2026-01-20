@@ -5,6 +5,16 @@
 To temporarily run it, open the browser on `about:debugging#/runtime/this-firefox` (or clicking on the "Extensions" button on the toolbar, then on the gear and in "Debug Add-ons") and click on "Load temporary Add-on...". Select the `manifest.json` file. You should see a new extension added called "Datura extension", that will be removed when you close the browser.
 
 ## How it works
-Click on the checkbox to toggle routing all traffic through 127.0.0.1:port. You can set the desired port on the numeric input just above it.
+When the user clicks on the extension, this interface will be shown by default:
+![](pics/default.png)
 
-This extension makes a firefox-based regular browser able to connect to .onion domains (not tested with i2p yet), presenting no DNS/WebRTC leaks.
+Click on the checkbox to toggle routing all traffic through 127.0.0.1:port. You can set the desired port on the numeric input just above it. Notice that when you change the port while being connected, the extension won't stop routing requests, to avoid any possible leak.
+![](pics/connected.png)
+![](pics/p_changed.png)
+
+This extension makes a Firefox based regular browser able to connect to .onion domains (not tested with i2p yet), presenting no DNS/WebRTC leaks (tested with [ident.me](https://ident.me) and [dnsleaktest](https://dnsleaktest.com)).
+![](pics/try_off.png)
+![](pics/try_on.png)
+
+## Conclusion
+This PoC shows that a web extension is certainly possible to achieve effective routing with no leaks via any localhost port on Firefox based browsers. Altough it would require some more code of add, it's totally sustainable to add support for Chromium based browsers too.

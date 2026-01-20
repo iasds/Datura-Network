@@ -18,13 +18,26 @@ async fn bench_getrandom() -> u128 {
     start.elapsed().as_nanos()
 }
 
-async fn bench_rand() -> u128 {
+async fn bench_rebuilt_rand() -> u128 {
     let mut buf = [0u8; 16];
-    let mut rng = rand::rng();
 
     let start = Instant::now();
     for _ in 0..ITERS {
-        rng.fill(&mut buf);
+	let mut rng = rand::rng();
+	rng.fill(&mut buf);
+        black_box(&buf);
+    }
+
+    start.elapsed().as_nanos()
+}
+
+async fn bench_single_rand() -> u128 {
+    let mut buf = [0u8; 16];
+
+    let mut rng = rand::rng();
+    let start = Instant::now();
+    for _ in 0..ITERS {
+	rng.fill(&mut buf);
         black_box(&buf);
     }
 
@@ -50,5 +63,6 @@ where
 #[tokio::main]
 async fn main() {
     run_bench("getrandom::fill", bench_getrandom).await;
-    run_bench("rand::rng", bench_rand).await;
+    run_bench("rand::rng (single)", bench_single_rand).await;
+    run_bench("rand::rng (rebuilt)", bench_rebuilt_rand).await;
 }

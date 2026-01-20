@@ -1,17 +1,44 @@
 //! copied from Pow-4.
+use std::time::Duration;
+
 use rand::Rng;
 use randomx_rs::{RandomXCache, RandomXDataset, RandomXError, RandomXFlag, RandomXVM};
+use tokio::time::Instant;
 
 const CHALLENGE_DIFFICULTY: u8 = 15;
+const CHALLENGE_VALIDITY: u64 = 24; // 24h
 pub const SEED_HASH: &[u8; 64] =
     b"1a803c1f384ff8b3cb35597b8d3364d32978e4aaa7f96ca894917b6d1d473fda";
 
-pub fn create_challenge() -> [u8; 16] {
-    let mut buf = [0u8; 16];
-    rand::rng().fill(&mut buf);
-    buf[0] = CHALLENGE_DIFFICULTY & 0b111111;
+#[derive(Debug, Clone)]
+pub struct Challenge {
+    inner: [u8; 16],
+    valid_until: Instant,
+}
 
-    buf
+impl Challenge {
+    fn create() -> [u8; 16] {
+        let mut buf = [0u8; 16];
+        rand::rng().fill(&mut buf);
+        buf[0] = CHALLENGE_DIFFICULTY & 0b111111;
+
+        buf
+    }
+
+    pub fn new() -> Self {
+        Self {
+            inner: Self::create(),
+            valid_until: Instant::now() + Duration::from_hours(CHALLENGE_VALIDITY),
+        }
+    }
+
+    pub fn get(&mut self) -> [u8; 16] {
+        if Instant::now() >= self.valid_until {
+            self.inner = Self::create();
+            self.valid_until = Instant::now() + Duration::from_hours(CHALLENGE_VALIDITY);
+        }
+        self.inner
+    }
 }
 
 pub fn validate_solution(vm: &RandomXVM, challenge: [u8; 16], solution: [u8; 8]) -> bool {

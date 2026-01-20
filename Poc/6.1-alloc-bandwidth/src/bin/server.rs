@@ -87,23 +87,23 @@ async fn data_thread(limiters: NodeHashMap) -> Result<(), Box<dyn Error>> {
 
                         let limiter = limiters
                             .lock()
-			    .await
+                            .await
                             .entry(addr.ip())
                             .or_insert_with(|| Arc::new(Mutex::new(NodeRateLimiter::anon())))
                             .clone();
 
-			let mut limiter = limiter.lock().await;
+                        let mut limiter = limiter.lock().await;
 
-			match limiter.rate {
-			    NodeRate::Auth(timeout, cap) => {
-				if cap > n && timeout > Instant::now() {
-				    limiter.rate = NodeRate::Auth(timeout, cap - n);
-				} else {
-				    *limiter = NodeRateLimiter::anon();
-				}
-			    }
-			    NodeRate::Anon(_) => ()
-			};
+                        match limiter.rate {
+                            NodeRate::Auth(timeout, cap) => {
+                                if cap > n && timeout > Instant::now() {
+                                    limiter.rate = NodeRate::Auth(timeout, cap - n);
+                                } else {
+                                    *limiter = NodeRateLimiter::anon();
+                                }
+                            }
+                            NodeRate::Anon(_) => (),
+                        };
 
                         limiter.bucket.acquire(n).await;
                     }
@@ -141,7 +141,7 @@ async fn control_thread(
 
             match &mut limiter.rate {
                 NodeRate::Anon(challenge) => {
-		    let challenge = challenge.get();
+                    let challenge = challenge.get();
                     socket.write_all(&challenge).await.unwrap();
 
                     if socket.read(&mut solution).await.unwrap() == 8 {

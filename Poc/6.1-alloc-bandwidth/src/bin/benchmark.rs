@@ -23,8 +23,8 @@ async fn bench_rebuilt_rand() -> u128 {
 
     let start = Instant::now();
     for _ in 0..ITERS {
-	let mut rng = rand::rng();
-	rng.fill(&mut buf);
+        let mut rng = rand::rng();
+        rng.fill(&mut buf);
         black_box(&buf);
     }
 
@@ -37,7 +37,7 @@ async fn bench_single_rand() -> u128 {
     let mut rng = rand::rng();
     let start = Instant::now();
     for _ in 0..ITERS {
-	rng.fill(&mut buf);
+        rng.fill(&mut buf);
         black_box(&buf);
     }
 

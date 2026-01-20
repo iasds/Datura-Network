@@ -89,7 +89,7 @@ async fn data_thread(limiters: NodeHashMap) -> Result<(), Box<dyn Error>> {
                             .lock()
 			    .await
                             .entry(addr.ip())
-                            .or_insert(Arc::new(Mutex::new(NodeRateLimiter::anon())))
+                            .or_insert_with(|| Arc::new(Mutex::new(NodeRateLimiter::anon())))
                             .clone();
 
 			let mut limiter = limiter.lock().await;
@@ -134,7 +134,7 @@ async fn control_thread(
                 .lock()
                 .await
                 .entry(addr.ip())
-                .or_insert(Arc::new(Mutex::new(NodeRateLimiter::anon())))
+                .or_insert_with(|| Arc::new(Mutex::new(NodeRateLimiter::anon())))
                 .clone();
 
             let mut limiter = limiter.lock().await;

@@ -5,7 +5,6 @@ use rand::Rng;
 use randomx_rs::{RandomXCache, RandomXDataset, RandomXError, RandomXFlag, RandomXVM};
 use tokio::time::Instant;
 
-const CHALLENGE_DIFFICULTY: u8 = 15;
 const CHALLENGE_VALIDITY: u64 = 24; // 24h
 pub const SEED_HASH: &[u8; 64] =
     b"1a803c1f384ff8b3cb35597b8d3364d32978e4aaa7f96ca894917b6d1d473fda";
@@ -17,10 +16,10 @@ pub struct Challenge {
 }
 
 impl Challenge {
-    fn create() -> [u8; 16] {
+    fn create(difficulty: u8) -> [u8; 16] {
         let mut buf = [0u8; 16];
         rand::rng().fill(&mut buf);
-        buf[0] = CHALLENGE_DIFFICULTY & 0b111111;
+        buf[0] = difficulty & 0b111111;
 
         buf
     }
@@ -32,9 +31,9 @@ impl Challenge {
         }
     }
 
-    pub fn get(&mut self) -> [u8; 16] {
+    pub fn get(&mut self, difficulty: u8) -> [u8; 16] {
         if self.inner.is_none() || Instant::now() >= self.valid_until {
-            self.inner = Some(Self::create());
+            self.inner = Some(Self::create(difficulty));
             self.valid_until = Instant::now() + Duration::from_hours(CHALLENGE_VALIDITY);
         }
         self.inner.unwrap()

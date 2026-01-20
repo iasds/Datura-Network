@@ -20,6 +20,8 @@ const AUTH_BANDWIDTH: usize = 1024 * 1024; // 1mb
 const DATA_CAP: usize = 100 * 1024 * 1024; // 100mb
 const TIME_CAP: u64 = 1; // 1h
 
+const CHALLENGE_DIFFICULTY: u8 = 15;
+
 type NodeID = IpAddr; // node are identified by their ip address
 
 #[derive(Debug, Clone)]
@@ -141,7 +143,7 @@ async fn control_thread(
 
             match &mut limiter.rate {
                 NodeRate::Anon(challenge) => {
-                    let challenge = challenge.get();
+                    let challenge = challenge.get(CHALLENGE_DIFFICULTY);
                     socket.write_all(&challenge).await.unwrap();
 
                     if socket.read(&mut solution).await.unwrap() == 8 {

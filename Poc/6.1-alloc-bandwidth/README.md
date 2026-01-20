@@ -50,3 +50,11 @@ sufficient security guarantees.
 
 Additionally, we can see recreating `rand::rng()` on each iteration is not very costly
 (1 ns/call), so this is not a big concern.
+
+# Conclusion
+
+The improvements made over 6-throttling make sense, and it's the start of something that
+could reasonably used in the final project. The challenging part here was mainly to
+manage the difficulty according to the bandwidth.
+
+This PoC is successfully implemented.

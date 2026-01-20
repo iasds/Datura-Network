@@ -12,7 +12,7 @@ pub const SEED_HASH: &[u8; 64] =
 
 #[derive(Debug, Clone)]
 pub struct Challenge {
-    inner: [u8; 16],
+    inner: Option<[u8; 16]>,
     valid_until: Instant,
 }
 
@@ -27,17 +27,17 @@ impl Challenge {
 
     pub fn new() -> Self {
         Self {
-            inner: Self::create(),
+            inner: None,
             valid_until: Instant::now() + Duration::from_hours(CHALLENGE_VALIDITY),
         }
     }
 
     pub fn get(&mut self) -> [u8; 16] {
-        if Instant::now() >= self.valid_until {
-            self.inner = Self::create();
+        if self.inner.is_none() || Instant::now() >= self.valid_until {
+            self.inner = Some(Self::create());
             self.valid_until = Instant::now() + Duration::from_hours(CHALLENGE_VALIDITY);
         }
-        self.inner
+        self.inner.unwrap()
     }
 }
 

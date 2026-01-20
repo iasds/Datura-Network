@@ -9,30 +9,39 @@ const CONTROL_ADDR: &str = "127.0.0.1:9978";
 
 #[tokio::main]
 async fn main() {
-    let mut stream = TcpStream::connect(CONTROL_ADDR).await.unwrap();
     let mut solution = getrandom::u64().unwrap();
 
     let vm = pow::create_vm().unwrap();
 
     let mut challenge = [0; 16];
 
+    let mut stream = TcpStream::connect(CONTROL_ADDR).await.unwrap();
     match stream.read(&mut challenge).await {
         Ok(16) => {
             println!("Challenge received.");
-            while !pow::validate_solution(&vm, challenge, solution.to_ne_bytes()) {
-                solution += 1;
-            }
-            match stream.write_all(&solution.to_ne_bytes()).await {
-                Ok(_) => {
-                    println!("Challenge has been solved, and throttling lifted.");
-                }
-                Err(e) => {
-                    eprintln!("Unexpected error: {}", e);
-                }
-            }
         }
         _ => {
-            eprintln!("Unexpected server behavior.");
+            eprintln!("Server closed connection unexpectedly.");
+            return;
+        }
+    }
+    // do not hold the connection. the control thread holds a deadlock on your node's
+    // RateLimiter, so you can't send simultaneously data on the control and the data
+    // port. it only affects your node, e.g you can't block other nodes. should this be
+    // fixed?
+    stream.shutdown().await.unwrap();
+
+    while !pow::validate_solution(&vm, challenge, solution.to_ne_bytes()) {
+        solution += 1;
+    }
+
+    let mut stream = TcpStream::connect(CONTROL_ADDR).await.unwrap();
+    match stream.write_all(&solution.to_ne_bytes()).await {
+        Ok(_) => {
+            println!("Challenge has been solved, and throttling lifted.");
+        }
+        Err(e) => {
+            eprintln!("Unexpected error: {}", e);
         }
     }
 }

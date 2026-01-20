@@ -2,11 +2,11 @@ use leaky_bucket::RateLimiter;
 use std::collections::HashMap;
 use std::error::Error;
 use std::net::IpAddr;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::thread;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::{Mutex, mpsc, oneshot};
 use tokio::task::JoinHandle;
 use tokio::time::Duration;
 use tokio::time::sleep;
@@ -57,7 +57,7 @@ async fn data_thread(limiters: NodeHashMap) -> Result<(), Box<dyn Error>> {
                         }
                         let (limiter, _) = limiters
                             .lock()
-                            .unwrap()
+			    .await
                             .entry(addr.ip())
                             .and_modify(|(limiter, cancellations)| {
                                 let finished = match cancellations {
@@ -139,7 +139,7 @@ async fn control_thread(
                     .await
                     .unwrap();
                 if vm_rx.await.unwrap() {
-                    limiters.lock().unwrap().insert(
+                    limiters.lock().await.insert(
                         addr.ip(),
                         (
                             Arc::new(
@@ -154,7 +154,7 @@ async fn control_thread(
                             NodeRate::Auth((
                                 Arc::new(tokio::spawn(async move {
                                     sleep(Duration::from_secs(TIME_CAP)).await;
-                                    limiters_.lock().unwrap().insert(
+                                    limiters_.lock().await.insert(
                                         addr.ip(),
                                         (
                                             Arc::new(

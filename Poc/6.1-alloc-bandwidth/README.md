@@ -3,7 +3,7 @@
 Run to test randomness sources.
 
 ```
-cargo run --bin benchmark
+nix run .#benchmark
 ```
 
 getrandom::fill() documentation says :
@@ -12,11 +12,15 @@ In general, `getrandom` will be fast enough for interactive usage, though
 significantly slower than a user-space CSPRNG; for the latter consider
 [`rand::thread_rng`](https://docs.rs/rand/*/rand/fn.thread_rng.html).
 
-
-However, on my system, `rand::rng` (new name of `thread_rng`) performs more than 2.5
-times (!) slower. I'd like inputs from some other systems, to test if I'm an oddity.
-
 ```
-getrandom::fill      |   294.05 ns/call | 3.40 Mops/s
-rand::rng            |   768.22 ns/call | 1.30 Mops/s
+getrandom::fill      |   253.27 ns/call | 3.95 Mops/s
+rand::rng            |     9.14 ns/call | 109.42 Mops/s
 ```
+
+The benchmark should be run with `--release`! (`nix` does it automatically, `cargo` runs
+in debug mode by default).
+
+Indeed, `getrandom::fill` is 25x slower than `rand::rng`. There is a
+[discussion](https://docs.rs/rand/latest/rand/rngs/struct.ThreadRng.html#Security)
+weighing on `rand::rng`'s security. IMHO, this (way faster) random generator offers
+sufficient security guarantees.

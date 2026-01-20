@@ -8,8 +8,8 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 use tokio::sync::{Mutex, mpsc, oneshot};
 use tokio::task::JoinHandle;
-use tokio::time::Duration;
 use tokio::time::sleep;
+use tokio::time::{Duration, Instant};
 
 use alloc_bandwidth::pow;
 
@@ -20,17 +20,48 @@ const BUFFER_SIZE: usize = 8192;
 const ANON_BANDWIDTH: usize = 10 * 1024; // 10kb
 const AUTH_BANDWIDTH: usize = 1024 * 1024; // 1mb
 const DATA_CAP: usize = 100 * 1024 * 1024; // 100mb
-const TIME_CAP: u64 = 3600; // 1h
+const TIME_CAP: u64 = 1; // 1h
 
 type NodeID = IpAddr; // node are identified by their ip address
 
 #[derive(Debug, Clone)]
 pub enum NodeRate {
     Anon(()),
-    Auth((Arc<JoinHandle<()>>, usize)),
+    Auth(Instant, usize),
 }
 
-type NodeHashMap = Arc<Mutex<HashMap<NodeID, (Arc<RateLimiter>, NodeRate)>>>;
+pub struct NodeRateLimiter {
+    bucket: RateLimiter,
+    rate: NodeRate,
+}
+
+impl NodeRateLimiter {
+    pub fn anon() -> Self {
+        Self {
+            bucket: RateLimiter::builder()
+                .initial(ANON_BANDWIDTH)
+                .max(ANON_BANDWIDTH)
+                .refill(ANON_BANDWIDTH / 100)
+                .interval(Duration::from_millis(10))
+                .build(),
+            rate: NodeRate::Anon(()),
+        }
+    }
+
+    pub fn auth() -> Self {
+        Self {
+            bucket: RateLimiter::builder()
+                .initial(AUTH_BANDWIDTH)
+                .max(AUTH_BANDWIDTH)
+                .refill(AUTH_BANDWIDTH / 100)
+                .interval(Duration::from_millis(10))
+                .build(),
+            rate: NodeRate::Auth(Instant::now() + Duration::from_hours(TIME_CAP), DATA_CAP),
+        }
+    }
+}
+
+type NodeHashMap = Arc<Mutex<HashMap<NodeID, Arc<Mutex<NodeRateLimiter>>>>>;
 
 // inspired from https://github.com/tokio-rs/tokio/blob/master/examples/echo-tcp.rs
 async fn data_thread(limiters: NodeHashMap) -> Result<(), Box<dyn Error>> {

@@ -9,7 +9,7 @@ use tokio::net::TcpListener;
 use tokio::sync::{Mutex, mpsc, oneshot};
 use tokio::time::{Duration, Instant};
 
-use alloc_bandwidth::pow;
+use alloc_bandwidth::pow::{self, Challenge};
 
 const DATA_ADDR: &str = "127.0.0.1:9977";
 const CONTROL_ADDR: &str = "127.0.0.1:9978";
@@ -24,7 +24,7 @@ type NodeID = IpAddr; // node are identified by their ip address
 
 #[derive(Debug, Clone)]
 pub enum NodeRate {
-    Anon(()),
+    Anon(Challenge),
     Auth(Instant, usize),
 }
 
@@ -42,7 +42,7 @@ impl NodeRateLimiter {
                 .refill(ANON_BANDWIDTH / 100)
                 .interval(Duration::from_millis(10))
                 .build(),
-            rate: NodeRate::Anon(()),
+            rate: NodeRate::Anon(Challenge::new()),
         }
     }
 
@@ -139,10 +139,9 @@ async fn control_thread(
 
             let mut limiter = limiter.lock().await;
 
-            match limiter.rate {
-                NodeRate::Anon(()) => {
-                    // new challenge
-                    let challenge = [0u8; 16];
+            match &mut limiter.rate {
+                NodeRate::Anon(challenge) => {
+		    let challenge = challenge.get();
                     socket.write_all(&challenge).await.unwrap();
 
                     if socket.read(&mut solution).await.unwrap() == 8 {

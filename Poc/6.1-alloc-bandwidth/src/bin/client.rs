@@ -30,6 +30,7 @@ async fn main() {
     // port. it only affects your node, e.g you can't block other nodes. should this be
     // fixed?
     stream.shutdown().await.unwrap();
+    println!("Difficulty is {}.", challenge[0] & 0b111111);
 
     while !pow::validate_solution(&vm, challenge, solution.to_ne_bytes()) {
         solution += 1;

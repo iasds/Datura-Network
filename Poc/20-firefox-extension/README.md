@@ -6,15 +6,22 @@ To temporarily run it, open the browser on `about:debugging#/runtime/this-firefo
 
 ## How it works
 When the user clicks on the extension, this interface will be shown by default:
+
 ![](pics/default.png)
 
 Click on the checkbox to toggle routing all traffic through 127.0.0.1:port. You can set the desired port on the numeric input just above it. Notice that when you change the port while being connected, the extension won't stop routing requests, to avoid any possible leak.
+
 ![](pics/connected.png)
 ![](pics/p_changed.png)
 
-This extension makes a Firefox based regular browser able to connect to .onion domains (not tested with i2p yet), presenting no DNS/WebRTC leaks (tested with [ident.me](https://ident.me) and [dnsleaktest](https://dnsleaktest.com)).
+This extension makes a Firefox based regular browser able to connect to .onion domains (not tested with i2p yet), presenting no DNS/WebRTC leaks (tested with [ident.me](https://ident.me), [Mullvad's connection checker](https://mullvad.net/en/check) and [DNSleaktest](https://dnsleaktest.com)).
+
 ![](pics/try_off.png)
 ![](pics/try_on.png)
+
+You can also see that Mullvad's Connection Checker is displaying a Tor exit node IP, and that WebRTC doesn't load either because the browser is set to only allow connections using TURN on a TCP connection through a proxy, and WebRTC works under UDP.
+
+![](pics/mullvad_check.png)
 
 ## Conclusion
 This PoC shows that a web extension is certainly possible to achieve effective routing with no leaks via any localhost port on Firefox based browsers. Altough it would require some more code of add, it's totally sustainable to add support for Chromium based browsers too.

@@ -19,8 +19,60 @@ The difficulty increases this way:
   constant (currently 12).
 - Over 90%, the (average) time to calculate a solution will double for every additional
   10% of bandwidth used.
+  
+# Testing
 
-# Random tests
+## Testing the bandwidth
+
+We reproduce the same setup as 6-throttling.
+
+However, we can change some variables :
+
+```rs
+const NODE_BANDWIDTH: usize = 900 * 1024; // 900kb
+const NORMAL_DIFFICULTY: u8 = 6;
+```
+
+This way, a single connection will be able to fill the node's bandwidth.
+
+We also replace the time cap to 10 seconds (to show an effect quickly).
+
+```rs
+Duration::from_secs(10)
+```
+
+Running the client in a loop
+
+```
+while true; do nix run .#client; done
+```
+
+We observe that the bandwidth grows quickly to a point of stability.
+
+```
+Challenge received.
+Difficulty is 6.
+Challenge has been solved, and throttling lifted.
+Challenge received.
+Difficulty is 7.
+Challenge has been solved, and throttling lifted.
+Challenge received.
+Difficulty is 8.
+Challenge has been solved, and throttling lifted.
+Challenge received.
+Difficulty is 7.
+Challenge has been solved, and throttling lifted.
+Challenge received.
+Difficulty is 8.
+Challenge has been solved, and throttling lifted.
+Challenge received.
+Difficulty is 8.
+Challenge has been solved, and throttling lifted.
+```
+
+Here, it oscillates between 7 and 8, before settling on 8.
+
+## Random tests
 
 Run to test randomness sources.
 

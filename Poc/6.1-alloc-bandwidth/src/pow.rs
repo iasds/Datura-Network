@@ -40,6 +40,12 @@ impl Challenge {
     }
 }
 
+impl Default for Challenge {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 pub fn validate_solution(vm: &RandomXVM, challenge: [u8; 16], solution: [u8; 8]) -> bool {
     let mut cat = [0u8; 24];
     cat[..16].copy_from_slice(&challenge);

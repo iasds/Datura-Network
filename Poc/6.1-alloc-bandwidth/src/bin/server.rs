@@ -8,7 +8,7 @@ use tokio::net::TcpListener;
 use tokio::sync::{Mutex, mpsc, oneshot};
 use tokio::time::Instant;
 
-use alloc_bandwidth::bandwidth::{NodeRate, NodeRateLimiter, TOTAL_BANDWIDTH_LIMITER, difficulty};
+use alloc_bandwidth::bandwidth::{AUTH_BANDWIDTH, NODE_BANDWIDTH, NodeRate, NodeRateLimiter, TOTAL_BANDWIDTH_LIMITER, difficulty};
 use alloc_bandwidth::pow;
 
 const DATA_ADDR: &str = "127.0.0.1:9977";
@@ -112,7 +112,17 @@ async fn control_thread(
                         if vm_rx.await.unwrap() {
                             *limiter = NodeRateLimiter::auth();
                         }
-                    }
+                    } else {
+			// This is very bad for performance, obviously.
+			eprintln!(
+			    "Requested {} of bandwith from {} available.",
+			    AUTH_BANDWIDTH,
+			    {
+				let node = TOTAL_BANDWIDTH_LIMITER.lock().await;
+				NODE_BANDWIDTH as isize - (node.max() - node.balance()) as isize
+			    }
+			);
+		    }
                 }
                 NodeRate::Auth(..) => (),
             }

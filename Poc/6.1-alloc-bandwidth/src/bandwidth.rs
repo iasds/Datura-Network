@@ -8,9 +8,9 @@ use leaky_bucket::RateLimiter;
 
 use crate::pow::Challenge;
 
-const ANON_BANDWIDTH: usize = 10 * 1024; // 10kb
-const AUTH_BANDWIDTH: usize = 1024 * 1024; // 1mb
-const NODE_BANDWIDTH: usize = 100 * 1024 * 1024; // 100mb
+pub const ANON_BANDWIDTH: usize = 10 * 1024; // 10kb
+pub const AUTH_BANDWIDTH: usize = 1024 * 1024; // 1mb
+pub const NODE_BANDWIDTH: usize = 100 * 1024 * 1024; // 100mb
 const DATA_CAP: usize = 100 * 1024 * 1024; // 100mb
 const TIME_CAP: u64 = 1; // 1h
 

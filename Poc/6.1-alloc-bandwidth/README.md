@@ -29,7 +29,7 @@ We reproduce the same setup as 6-throttling.
 However, we can change some variables :
 
 ```rs
-const NODE_BANDWIDTH: usize = 900 * 1024; // 900kb
+pub const NODE_BANDWIDTH: usize = 900 * 1024; // 900kb
 const NORMAL_DIFFICULTY: u8 = 6;
 ```
 

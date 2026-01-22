@@ -46,27 +46,48 @@ while true; do nix run .#client; done
 We observe that the bandwidth grows quickly to a point of stability.
 
 ```
-Challenge received.
-Difficulty is 6.
-Challenge has been solved, and throttling lifted.
-Challenge received.
-Difficulty is 7.
-Challenge has been solved, and throttling lifted.
-Challenge received.
-Difficulty is 8.
-Challenge has been solved, and throttling lifted.
-Challenge received.
-Difficulty is 7.
-Challenge has been solved, and throttling lifted.
-Challenge received.
-Difficulty is 8.
-Challenge has been solved, and throttling lifted.
-Challenge received.
-Difficulty is 8.
-Challenge has been solved, and throttling lifted.
+server: (10KiB/s)
+client: Challenge received.
+server: Requested 1048576 of bandwith from 913408 available.
+client: Difficulty is 3.
+client: Challenge has been solved, and throttling lifted.
+server: (1MiB/s)
+
+client: Challenge received.
+server: Requested 1048576 of bandwith from -134656 available.
+client: Difficulty is 5.
+client: Challenge has been solved, and throttling lifted.
+
+client: Challenge received.
+server: Requested 1048576 of bandwith from 913408 available.
+client: Difficulty is 3.
+client: Challenge has been solved, and throttling lifted.
+
+client: Challenge received.
+server: Requested 1048576 of bandwith from 913408 available.
+client: Difficulty is 3.
+client: Challenge has been solved, and throttling lifted.
+
+client: Challenge received.
+server: Requested 1048576 of bandwith from 913408 available.
+client: Difficulty is 3.
+client: Challenge has been solved, and throttling lifted.
+
+client: Challenge received.
+server: Requested 1048576 of bandwith from 913408 available.
+client: Difficulty is 3.
+client: Challenge has been solved, and throttling lifted.
+
+client: Challenge received.
+server: Requested 1048576 of bandwith from -166164 available.
+client: Difficulty is 6.
+client: Challenge has been solved, and throttling lifted.
 ```
 
-Here, it oscillates between 7 and 8, before settling on 8.
+Here, it oscillates from 3 to 6. This kind of testing gives a very high volatility,
+because the bandwidth measurement heavily depends on when the limiter's allotted tokens
+are measured, because we're trying to max out the connection of the node with only one
+other node's traffic.
 
 ## Random tests
 
@@ -104,5 +125,9 @@ Additionally, we can see recreating `rand::rng()` on each iteration is not very 
 The improvements made over 6-throttling make sense, and it's the start of something that
 could reasonably used in the final project. The challenging part here was mainly to
 manage the difficulty according to the bandwidth.
+
+Testing can definitely be improved with a more complex setup involving network
+namespaces, and a lot of different nodes trying to connect to a server, but that's out
+of the scope of this PoC.
 
 This PoC is successfully implemented.

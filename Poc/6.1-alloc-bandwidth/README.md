@@ -29,17 +29,13 @@ We reproduce the same setup as 6-throttling.
 However, we can change some variables :
 
 ```rs
-pub const NODE_BANDWIDTH: usize = 900 * 1024; // 900kb
-const NORMAL_DIFFICULTY: u8 = 6;
+pub const NODE_BANDWIDTH: usize = 850 * 1024; // 850kb
+const NORMAL_DIFFICULTY: u8 = 3;
+const DATA_CAP: usize = 5 * 1024 * 1024; // 5mb
 ```
 
-This way, a single connection will be able to fill the node's bandwidth.
-
-We also replace the time cap to 10 seconds (to show an effect quickly).
-
-```rs
-Duration::from_secs(10)
-```
+This way, a single connection will be able to fill the node's bandwidth, be quickly
+rejected, and iterate over the PoW requests.
 
 Running the client in a loop
 

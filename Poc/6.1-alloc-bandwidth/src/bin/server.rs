@@ -1,4 +1,3 @@
-use alloc_bandwidth::bandwidth::{NODE_RATE_LIMITER, NodeRate, difficulty};
 use std::collections::HashMap;
 use std::error::Error;
 use std::net::IpAddr;
@@ -9,7 +8,7 @@ use tokio::net::TcpListener;
 use tokio::sync::{Mutex, mpsc, oneshot};
 use tokio::time::Instant;
 
-use alloc_bandwidth::bandwidth::NodeRateLimiter;
+use alloc_bandwidth::bandwidth::{NodeRate, NodeRateLimiter, TOTAL_BANDWIDTH_LIMITER, difficulty};
 use alloc_bandwidth::pow;
 
 const DATA_ADDR: &str = "127.0.0.1:9977";
@@ -66,7 +65,7 @@ async fn data_thread(limiters: NodeHashMap) -> Result<(), Box<dyn Error>> {
 
                         limiter.bucket.acquire(n).await;
                         // we don't want the scheduler to lock if we go >100%.
-                        NODE_RATE_LIMITER.lock().await.try_acquire(n);
+                        TOTAL_BANDWIDTH_LIMITER.lock().await.try_acquire(n);
                     }
                     Err(e) => {
                         eprintln!("Failed to read from socket {}: {}", addr, e);

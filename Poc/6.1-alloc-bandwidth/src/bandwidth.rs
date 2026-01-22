@@ -16,7 +16,7 @@ const TIME_CAP: u64 = 1; // 1h
 
 const NORMAL_DIFFICULTY: u8 = 12; // standard difficulty of the challenge
 
-pub static NODE_RATE_LIMITER: LazyLock<Mutex<RateLimiter>> = LazyLock::new(|| {
+pub static TOTAL_BANDWIDTH_LIMITER: LazyLock<Mutex<RateLimiter>> = LazyLock::new(|| {
     Mutex::new(
         RateLimiter::builder()
             .initial(usize::MAX - 1)
@@ -72,7 +72,7 @@ impl NodeRateLimiter {
 /// every 10% of bandwidth.
 pub async fn difficulty() -> u8 {
     let used_bandwidth = {
-        let node = NODE_RATE_LIMITER.lock().await;
+        let node = TOTAL_BANDWIDTH_LIMITER.lock().await;
         node.max() - node.balance()
     };
 

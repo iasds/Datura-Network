@@ -1,4 +1,4 @@
-# Datura Network Specification v0.5 (DRAFT)
+# Datura Network Specification v0.5.1 (DRAFT)
 
 ## The Threat Model
 
@@ -521,3 +521,37 @@ The Adversary is essentially going to be forced to anonymously pay the exit node
 There will always be uncertainty in regards to the amount of exit nodes that have been rented out by legit users in the past, and the current amount of exit nodes that are yet to be rented out.
 
 Once an exit node is revealed to a user, all they need to do is use the given node's hash in their own node's configuration, to constantly route clearnet traffic to that node in particular.
+
+## PoW-based Resource Allocation (Variable Pricing)
+
+### What does it solve?
+
+The PoW-based resource allocation system addresses the threat of **Disruptive Adversary Threats (DDoS Attacks)** and **Active Adversary Threats (Sybil Attacks)** by making it economically expensive for an attacker to consume a disproportionate amount of network resources. When allocating resources like bandwidth, a naive approach can lead to starvation, where malicious actors grab as many resources as possible to deny them to legitimate users.
+
+This system ensures fair resource distribution by requiring clients to provide Proof-of-Work (PoW). The more PoW a client provides, the more resources they can access. However, it's not a simple linear relationship. The system is designed to be fair and resistant to several attack vectors.
+
+### Threat Model Reference
+
+This system directly mitigates the following threats mentioned in the "The Threat Model" section:
+
+*   **Active Adversary Threats (Sybil Attacks):** By requiring a minimum PoW contribution, it becomes expensive for an adversary to create a large number of fake identities (Sybils) to overwhelm the network.
+*   **Disruptive Adversary Threats (DDoS Attacks):** The PoW requirement acts as a rate-limiting mechanism, making it costly for an attacker to flood the network with traffic.
+
+### High-Level Explanation
+
+The resource allocation system uses a multi-layered approach to ensure fairness and security:
+
+1.  **Minimum Contribution Threshold:** To qualify for a guaranteed minimum share of resources, a client must provide a certain minimum amount of PoW. This is the primary defense against Sybil attacks, as it prevents an attacker from creating many low-effort clients to gain an unfair advantage. Clients who don't meet this threshold can still get resources, but they are not guaranteed a minimum share.
+
+2.  **Tenure-Based Minimum Allocation:** To protect legitimate users with less powerful devices from being overshadowed by powerful but new clients, the system incorporates the concept of "tenure". Clients that have been connected to the network for a longer time receive a higher guaranteed minimum allocation. This ensures that long-standing, well-behaved clients are not starved of resources.
+
+3.  **Sublinear Compression:** To prevent a single, powerful attacker from monopolizing the network's resources (a "monopoly attack"), the system applies a sublinear compression function (specifically, a square root) to the PoW contribution. This means that while more PoW still results in more resources, the returns are diminishing. For example, 100 times the hashing power does not result in 100 times the resources, but rather something closer to 10 times.
+
+4.  **Reserve Capacity Capping:** A fixed percentage of the total network capacity (e.g., 15%) is reserved for the minimum allocations guaranteed by the tenure system. This ensures that even with many long-standing clients, there is always a significant portion of the network's capacity available for allocation based purely on PoW contribution.
+
+In summary, the system calculates a client's resource allocation in two phases:
+
+*   **Reserve Phase:** For clients who meet the minimum contribution threshold, a guaranteed minimum allocation is calculated based on their tenure.
+*   **Earned Phase:** The remaining network capacity is distributed proportionally among all clients based on their (compressed) PoW contribution.
+
+A client's final allocation is the sum of their minimum and earned allocations. This two-tiered approach ensures that the network is both fair to legitimate users and resilient against common attacks.

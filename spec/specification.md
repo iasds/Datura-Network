@@ -1,4 +1,4 @@
-# Datura Network Specification v0.5 (DRAFT)
+# Datura Network Specification v0.5.1 (DRAFT)
 
 ## The Threat Model
 

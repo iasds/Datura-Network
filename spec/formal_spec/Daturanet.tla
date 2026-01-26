@@ -2,8 +2,8 @@
 
 EXTENDS Naturals,FiniteSets
 
-CONSTANTS Nodes, BootstrapNodes
-ASSUME BootstrapNodes \subset Nodes
+CONSTANTS Nodes, BootstrapNodes \* both are a set of model values
+ASSUME BootstrapNodes \subseteq Nodes
 
 VARIABLES known_nodes
 
@@ -28,7 +28,7 @@ Next == \E n \in Nodes :
 Spec == Init /\ [][Next]_vars /\ WF_vars(Next)
 
 \* eventually each node will have a list of Nodes containing more than the bootstrap
-EventuallyLearnNewNodes == <>[Cardinality(known_nodes[n]) > 1]_vars
+EventuallyLearnNewNodes == <>\A n \in Nodes: Cardinality(known_nodes[n]) > 1
 
 THEOREM Spec => Invariants /\ EventuallyLearnNewNodes
 

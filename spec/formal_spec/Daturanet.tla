@@ -1,40 +1,57 @@
-This module describes an initial abstract specification of the network.
-It is made of several nodes, each knowing a limited amount of other nodes
-We have a set of bootstrap nodes and want to show that after connecting
-and sharing information about themselves every node can know every other
-
+This module describes the core peer discovery protocol via gossip.
+Nodes share knowledge of other nodes they know about, starting from bootstrap nodes.
+The system converges when nodes discover each other through information propagation.
 
 ---------- MODULE Daturanet -----------
 
 EXTENDS Naturals, FiniteSets
 
-CONSTANTS Nodes, ConnStatus, BootstrapNodes, NodeStatus, MaxNodeMemory, MaxConnections
-ASSUME ConnStatus == {connected, unresponsive, disconnected}
-ASSUME NodeStatus == {running, rebooting, stopped}
-ASSUME MaxNodeMemory >= 2 \* we need to know at least a bootstrap node and another node
-ASSUME MaxConnections > 0 /\ MaxConnections < Cardinality(Nodes) \*we must be able to handle at least one connection per nodes and less than all nodes at the same time
-
-\* Nodes can't know every other node in the system
+CONSTANTS Nodes, BootstrapNodes, MaxNodeMemory
+ASSUME BootstrapNodes \subset Nodes
+ASSUME MaxNodeMemory >= 2
 ASSUME MaxNodeMemory < Cardinality(Nodes)
 
-\* There can be many bootstrap nodes but at least one normal node
-ASSUME BootstrapNodes \subset Nodes
+VARIABLES known_nodes, now
 
-VARIABLES known_nodes, bootstrap_nodes, node_status, node_connections, now, bad_nodes
+vars == <<known_nodes, now>>
 
-vars == <<known_nodes, bootstrap_nodes, node_status, now, node_connections, bad_nodes>>
+\* Each node knows a set of other nodes (including bootstrap nodes)
+\* Cardinality constrained by memory
+InvTypeOK == /\ known_nodes \in [Nodes -> SUBSET Nodes]
+             /\ \A n \in Nodes : Cardinality(known_nodes[n]) <= MaxNodeMemory
+             /\ now \in Nat
 
-InvTypeOK == /\ /\ known_nodes \in [ Nodes -> SUBSET Nodes ]
-                /\ \A n \in known_nodes: Cardinality(known_nodes[n]) <= MaxNodeMemory
-             /\ /\ node_connections \in [ Nodes -> SUBSET {[dest |-> d, timestamp |-> t, status |-> s] : d \in Nodes, t \in Nat, s \in ConnStatus } ]
-                /\ \A c \in node_connections: 
-                    /\ Cardinality(node_connections[c]) <= MaxConnections 
-                    /\ \A conn \in node_connections[c]: c /= conn.dest
-             /\ node_status \in SUBSET { [node |-> n1, status |-> s]: n1 \in Nodes, s \in NodeStatus }
-             /\ now \in Nat 
+\* At least one node is always honest (bootstrap doesn't disappear)
+InvBootstrapPreserved == \A n \in Nodes : BootstrapNodes \ {n} \subseteq known_nodes[n]
 
-InvAdversaryBehavior == bad_nodes \subset Nodes \* not all nodes turn bad at once
+GlobalInvariants == InvTypeOK /\ InvBootstrapPreserved
 
-GlobalInvariants == InvTypeOK /\ InvAdversaryBehavior
+\* Initially, every node knows bootstrap nodes (except itself)
+Init == /\ known_nodes = [n \in Nodes |-> BootstrapNodes \ {n}]
+        /\ now = 0
+
+\* Nodes gossip: pick a node and a peer, learn about peer's known nodes
+Gossip == \E n \in Nodes :
+          \E peer \in known_nodes[n] :
+          LET new_knowledge == known_nodes[n] \cup known_nodes[peer]
+              trimmed == IF Cardinality(new_knowledge) <= MaxNodeMemory
+                         THEN new_knowledge
+                         ELSE new_knowledge  \* TODO: eviction policy
+          IN known_nodes' = [known_nodes EXCEPT ![n] = trimmed]
+             /\ now' = now + 1
+
+\* Time advancement
+Tick == /\ now' = now + 1
+        /\ UNCHANGED known_nodes
+
+Next == Gossip \/ Tick
+
+Spec == Init /\ [][Next]_vars
+
+\* Liveness: every node eventually learns about at least one non-bootstrap node
+\* (through gossip, not just initial bootstrap knowledge)
+EventuallyLearnBeyondBootstrap == 
+  \A n \in Nodes :
+  \F (Cardinality(known_nodes[n]) > Cardinality(BootstrapNodes \ {n}))
 
 =========================================

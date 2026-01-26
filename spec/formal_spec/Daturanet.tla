@@ -1,57 +1,35 @@
-This module describes the core peer discovery protocol via gossip.
-Nodes share knowledge of other nodes they know about, starting from bootstrap nodes.
-The system converges when nodes discover each other through information propagation.
-
 ---------- MODULE Daturanet -----------
 
-EXTENDS Naturals, FiniteSets
+EXTENDS Naturals,FiniteSets
 
-CONSTANTS Nodes, BootstrapNodes, MaxNodeMemory
+CONSTANTS Nodes, BootstrapNodes
 ASSUME BootstrapNodes \subset Nodes
-ASSUME MaxNodeMemory >= 2
-ASSUME MaxNodeMemory < Cardinality(Nodes)
 
-VARIABLES known_nodes, now
+VARIABLES known_nodes
 
-vars == <<known_nodes, now>>
+vars == <<known_nodes>>
 
 \* Each node knows a set of other nodes (including bootstrap nodes)
-\* Cardinality constrained by memory
 InvTypeOK == /\ known_nodes \in [Nodes -> SUBSET Nodes]
-             /\ \A n \in Nodes : Cardinality(known_nodes[n]) <= MaxNodeMemory
-             /\ now \in Nat
+             /\ \A n \in Nodes: n \notin known_nodes[n]
 
-\* At least one node is always honest (bootstrap doesn't disappear)
-InvBootstrapPreserved == \A n \in Nodes : BootstrapNodes \ {n} \subseteq known_nodes[n]
+InvAlwaysKnowBootstrap == \A n \in Nodes: \E bn \in BootstrapNodes: bn /= n /\ bn \in known_nodes[n]
 
-GlobalInvariants == InvTypeOK /\ InvBootstrapPreserved
+Invariants == InvTypeOK /\ InvAlwaysKnowBootstrap
 
 \* Initially, every node knows bootstrap nodes (except itself)
-Init == /\ known_nodes = [n \in Nodes |-> BootstrapNodes \ {n}]
-        /\ now = 0
+Init == /\ known_nodes = [n \in Nodes |-> {CHOOSE bn \in BootstrapNodes: bn /= n }]
 
 \* Nodes gossip: pick a node and a peer, learn about peer's known nodes
-Gossip == \E n \in Nodes :
+Next == \E n \in Nodes :
           \E peer \in known_nodes[n] :
-          LET new_knowledge == known_nodes[n] \cup known_nodes[peer]
-              trimmed == IF Cardinality(new_knowledge) <= MaxNodeMemory
-                         THEN new_knowledge
-                         ELSE new_knowledge  \* TODO: eviction policy
-          IN known_nodes' = [known_nodes EXCEPT ![n] = trimmed]
-             /\ now' = now + 1
+          known_nodes' = [known_nodes EXCEPT ![n] = known_nodes[n] \cup known_nodes[peer]]
 
-\* Time advancement
-Tick == /\ now' = now + 1
-        /\ UNCHANGED known_nodes
+Spec == Init /\ [][Next]_vars /\ WF_vars(Next)
 
-Next == Gossip \/ Tick
+\* eventually each node will have a list of Nodes containing more than the bootstrap
+EventuallyLearnNewNodes == <>[Cardinality(known_nodes[n]) > 1]_vars
 
-Spec == Init /\ [][Next]_vars
-
-\* Liveness: every node eventually learns about at least one non-bootstrap node
-\* (through gossip, not just initial bootstrap knowledge)
-EventuallyLearnBeyondBootstrap == 
-  \A n \in Nodes :
-  \F (Cardinality(known_nodes[n]) > Cardinality(BootstrapNodes \ {n}))
+THEOREM Spec => Invariants /\ EventuallyLearnNewNodes
 
 =========================================

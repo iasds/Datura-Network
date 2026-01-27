@@ -3,3 +3,8 @@
 **/result
 **/*.toolbox
 **/*.tlacache
+**/*.aux
+**/*.dvi
+**/*.log
+**/*.tex
+**/*.pdf

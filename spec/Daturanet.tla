@@ -9,9 +9,6 @@ VARIABLES known_nodes
 
 vars == <<known_nodes>>
 
-DefaultNodeCardinality == 1..5
-DefaultBootstrapNodes == 1..2
-
 InvTypeOK == /\ known_nodes \in [Nodes -> SUBSET Nodes]
              /\ \A n \in Nodes: n \notin known_nodes[n]
 

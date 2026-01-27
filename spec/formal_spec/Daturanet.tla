@@ -3,11 +3,14 @@
 EXTENDS Naturals,FiniteSets
 
 CONSTANTS Nodes, BootstrapNodes \* both are a set of model values
-ASSUME BootstrapNodes \subseteq Nodes
+ASSUME BNinNodes == BootstrapNodes \subseteq Nodes
 
 VARIABLES known_nodes
 
 vars == <<known_nodes>>
+
+DefaultNodeCardinality == 1..10
+DefaultBootstrapNodes == 1..2
 
 \* Each node knows a set of other nodes (including bootstrap nodes)
 InvTypeOK == /\ known_nodes \in [Nodes -> SUBSET Nodes]

@@ -8,3 +8,5 @@
 **/*.log
 **/*.tex
 **/*.pdf
+**/states
+**/*TTrace*

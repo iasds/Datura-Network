@@ -372,4 +372,5 @@ EventualAllocation ==
 EpochProgress ==
     (active /= {} /\ epoch < MaxEpochs) ~> (epoch > 0)
 
+THEOREM Spec => Safety
 ====

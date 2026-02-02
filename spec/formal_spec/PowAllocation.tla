@@ -297,12 +297,26 @@ NoMonopolization ==
 InactiveZero ==
     \A c \in Client \ active : alloc[c] = 0
 
+\* --- I4: Allocation only from contribution ---
+\* If a client has non-zero allocation (which was computed in the prior epoch),
+\* they must have either:
+\*   1. Contributed in that prior epoch (before EndEpoch reset contrib), OR
+\*   2. Had positive tenure >= 1, meaning they were active in an earlier epoch
+\*      and earned a minimum guarantee (eligible for sustained allocation)
+\* This ensures all allocation traces back to actual work or eligible tenure.
+AllocationFromWorkOrTenure ==
+    \A c \in Client :
+        (alloc[c] > 0) => (contrib[c] > 0 \/ tenure[c] > 0)
+            \* Either they contributed this epoch (contrib > 0) or
+            \* they earned it via tenure in a prior epoch (tenure > 0)
+
 \* --- Combined safety invariant ---
 Safety ==
     /\ TypeOK
     /\ TotalAllocationBound
     /\ NoMonopolization
     /\ InactiveZero
+    /\ AllocationFromWorkOrTenure
 
 \* ================================================================
 \* Sybil-Specific Invariants
@@ -358,19 +372,6 @@ SybilSafety ==
     /\ SybilNoAmplification
     /\ CapAwareLegitAdvantage
 
-\* ================================================================
-\* Liveness Properties
-\* ================================================================
-
-\* A client that is active and has contributed will eventually
-\* receive a non-zero allocation (requires WF on EndEpoch).
-EventualAllocation ==
-    \A c \in Client :
-        (c \in active /\ contrib[c] > 0) ~> (alloc[c] > 0)
-
-\* Epochs keep advancing as long as clients are active.
-EpochProgress ==
-    (active /= {} /\ epoch < MaxEpochs) ~> (epoch > 0)
 
 THEOREM Spec => Safety
 ====

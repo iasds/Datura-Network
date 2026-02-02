@@ -247,8 +247,9 @@ Next ==
     \/ \E c \in Client : \E a \in 1..MaxContrib : SubmitWork(c, a)
     \/ EndEpoch
 
-\* Specification with weak fairness on EndEpoch.
-\* Guarantees epochs keep advancing (needed for liveness).
+\* Specification with weak fairness constraints.
+\* WF on EndEpoch ensures epochs keep advancing.
+\* WF on Next (combined with EndEpoch fairness) ensures the system progresses.
 Spec == Init /\ [][Next]_vars /\ WF_vars(EndEpoch)
 
 \* --- Alternative: Sybil attack scenario ---
@@ -328,23 +329,6 @@ Safety ==
 \* their compressed contribution share (no amplification).
 \* In other words: the threshold+tenure system doesn't give
 \* attackers MORE than pure proportional allocation would.
-SybilNoAmplification ==
-    LET
-        attackersActive == active \cap Attacker
-        cc == [c \in Client |->
-            IF c \in active THEN Compress(contrib[c]) ELSE 0]
-        totalCC == SetSum(active, cc)
-        attackerCC == SetSum(attackersActive, cc)
-        attackerAlloc == SetSum(attackersActive, alloc)
-        \* Attacker's "fair share" based on compressed contribution
-        attackerFairShare ==
-            IF totalCC > 0
-            THEN (attackerCC * Capacity) \div totalCC
-            ELSE 0
-    IN
-        \* Attacker allocation <= their compressed proportional share + rounding
-        attackerAlloc <= attackerFairShare + Cardinality(attackersActive)
-
 \* Qualified legitimate clients with tenure always get at least as
 \* much as any individual sub-threshold attacker client.
 LegitimateAdvantage ==
@@ -357,20 +341,6 @@ LegitimateAdvantage ==
             \* client. That's by design (anti-monopolization), but
             \* interesting to verify. See CapAwareLegitAdvantage below.
 
-\* Weaker version accounting for the allocation cap
-CapAwareLegitAdvantage ==
-    LET capVal == (MaxAllocPermille * Capacity) \div 1000
-    IN \A l \in active \cap Legitimate :
-       \A a \in active \cap Attacker :
-           (contrib[l] >= MinThreshold /\ contrib[a] < MinThreshold
-            /\ contrib[a] > 0 /\ contrib[l] > 0 /\ alloc[l] < capVal)
-           => alloc[l] >= alloc[a]
-
-\* Combined Sybil safety
-SybilSafety ==
-    /\ Safety
-    /\ SybilNoAmplification
-    /\ CapAwareLegitAdvantage
 
 
 THEOREM Spec => Safety

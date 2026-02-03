@@ -33,8 +33,8 @@ EXTENDS Integers, FiniteSets
 \* ================================================================
 
 CONSTANTS
-    PowClient,             \* Set of all possible client IDs (model values)
-    PowAttacker,           \* Subset of PowClient controlled by adversary
+    MaxNodes,              \* Set of node IDs {1..MaxNodes} (shared with Daturanet)
+    NAttackers,            \* Number of attacker nodes {1..NAttackers} (shared with Daturanet)
     PowCapacity,           \* Total resource capacity (integer, e.g. 1000)
     PowMinThreshold,       \* Min contribution to qualify for guarantee
     PowMaxAllocPermille,   \* Max allocation per client (permille, 250 = 25%)
@@ -42,8 +42,6 @@ CONSTANTS
     PowReservePermille,    \* Reserve earned per epoch of tenure (permille)
     PowMaxContrib,         \* Max contribution per epoch (bounds state space)
     PowMaxEpochs           \* Epoch bound for model checking termination
-
-ASSUME PowAttacker \subseteq PowClient
 ASSUME PowCapacity > 0
 ASSUME PowMaxAllocPermille > 0 /\ PowMaxAllocPermille <= 1000
 ASSUME PowMaxTenure >= 1
@@ -52,7 +50,8 @@ ASSUME PowReservePermille >= 0
 ASSUME PowMaxContrib >= 1
 ASSUME PowMaxEpochs >= 1
 
-PowLegitimate == PowClient \ PowAttacker
+PowAttacker == 1..NAttackers
+PowLegitimate == (NAttackers + 1)..MaxNodes
 
 \* ================================================================
 \* Variables
@@ -60,10 +59,10 @@ PowLegitimate == PowClient \ PowAttacker
 
 VARIABLES
     powEpoch,       \* Nat: current epoch number
-    powActive,      \* SUBSET PowClient: currently connected clients
-    powContrib,     \* [PowClient -> Nat]: weighted contribution this epoch
-    powTenure,      \* [PowClient -> Nat]: consecutive epochs connected
-    powAlloc        \* [PowClient -> Nat]: current resource allocation
+    powActive,      \* SUBSET 1..MaxNodes: currently connected clients
+    powContrib,     \* [1..MaxNodes -> Nat]: weighted contribution this epoch
+    powTenure,      \* [1..MaxNodes -> Nat]: consecutive epochs connected
+    powAlloc        \* [1..MaxNodes -> Nat]: current resource allocation
 
 powVars == <<powEpoch, powActive, powContrib, powTenure, powAlloc>>
 
@@ -129,18 +128,18 @@ Compress(x) ==
 \* and TLC will find a counterexample for TotalAllocationBound.
 
 ComputeAlloc(act, con, ten) ==
-    IF act = {} THEN [c \in PowClient |-> 0]
+    IF act = {} THEN [c \in 1..MaxNodes |-> 0]
     ELSE
     LET
         \* --- Step 1: Compressed contributions ---
-        cc == [c \in PowClient |->
+        cc == [c \in 1..MaxNodes |->
             IF c \in act THEN Compress(con[c]) ELSE 0]
 
         totalCC == SetSum(act, cc)
 
         \* --- Step 2: Proportional allocation ---
         \* Each client gets (their_compressed / total_compressed) × PowCapacity
-        prop == [c \in PowClient |->
+        prop == [c \in 1..MaxNodes |->
             IF c \in act /\ totalCC > 0
             THEN (cc[c] * PowCapacity) \div totalCC
             ELSE 0]
@@ -149,29 +148,29 @@ ComputeAlloc(act, con, ten) ==
         \* Only clients meeting PowMinThreshold qualify.
         \* Minimum = (capped_tenure × PowReservePermille / 1000) × share × PowCapacity
         \*         = (eTen × PowReservePermille × cc × PowCapacity) / (1000 × totalCC)
-        eTen == [c \in PowClient |-> Min(ten[c], PowMaxTenure)]
+        eTen == [c \in 1..MaxNodes |-> Min(ten[c], PowMaxTenure)]
 
-        minG == [c \in PowClient |->
+        minG == [c \in 1..MaxNodes |->
             IF c \in act /\ con[c] >= PowMinThreshold /\ totalCC > 0
             THEN (eTen[c] * PowReservePermille * cc[c] * PowCapacity)
                  \div (1000 * totalCC)
             ELSE 0]
 
         \* --- Step 4: Apply minimum guarantee ---
-        withMin == [c \in PowClient |->
+        withMin == [c \in 1..MaxNodes |->
             IF c \in act THEN Max(prop[c], minG[c]) ELSE 0]
 
         \* --- Step 5: Per-client cap ---
         capVal == (PowMaxAllocPermille * PowCapacity) \div 1000
 
-        capped == [c \in PowClient |-> Min(withMin[c], capVal)]
+        capped == [c \in 1..MaxNodes |-> Min(withMin[c], capVal)]
 
         \* --- Step 6: Normalize if overallocated ---
         \* This can happen when minimum guarantees push multiple
         \* clients above their proportional share simultaneously.
-        totalCapped == SetSum(PowClient, capped)
+        totalCapped == SetSum(1..MaxNodes, capped)
 
-        normalized == [c \in PowClient |->
+        normalized == [c \in 1..MaxNodes |->
             IF totalCapped > PowCapacity /\ totalCapped > 0
             THEN (capped[c] * PowCapacity) \div totalCapped
             ELSE capped[c]]
@@ -185,9 +184,9 @@ ComputeAlloc(act, con, ten) ==
 PowInit ==
     /\ powEpoch = 0
     /\ powActive = {}
-    /\ powContrib = [c \in PowClient |-> 0]
-    /\ powTenure  = [c \in PowClient |-> 0]
-    /\ powAlloc   = [c \in PowClient |-> 0]
+    /\ powContrib = [c \in 1..MaxNodes |-> 0]
+    /\ powTenure  = [c \in 1..MaxNodes |-> 0]
+    /\ powAlloc   = [c \in 1..MaxNodes |-> 0]
 
 \* ================================================================
 \* Actions
@@ -196,7 +195,7 @@ PowInit ==
 \* --- Client connects ---
 \* In the real system, this requires solving a connection PoW (2^14).
 \* Here we abstract that away: any client can connect at any time.
-\* The cost is modeled implicitly by the finite PowClient set.
+\* The cost is modeled implicitly by the finite 1..MaxNodes set.
 PowConnect(c) ==
     /\ c \notin powActive
     /\ powActive' = powActive \cup {c}
@@ -229,9 +228,9 @@ PowEndEpoch ==
     /\ powActive /= {}
     /\ powEpoch < PowMaxEpochs
     /\ powAlloc' = ComputeAlloc(powActive, powContrib, powTenure)
-    /\ powTenure' = [c \in PowClient |->
+    /\ powTenure' = [c \in 1..MaxNodes |->
          IF c \in powActive THEN powTenure[c] + 1 ELSE 0]
-    /\ powContrib' = [c \in PowClient |-> 0]
+    /\ powContrib' = [c \in 1..MaxNodes |-> 0]
     /\ powEpoch' = powEpoch + 1
     /\ UNCHANGED powActive
 
@@ -242,9 +241,9 @@ PowEndEpoch ==
 \* Full non-deterministic next state: any client can do anything.
 \* TLC explores ALL interleavings.
 PowNext ==
-    \/ \E c \in PowClient : PowConnect(c)
-    \/ \E c \in PowClient : PowDisconnect(c)
-    \/ \E c \in PowClient : \E a \in 1..PowMaxContrib : PowSubmitWork(c, a)
+    \/ \E c \in 1..MaxNodes : PowConnect(c)
+    \/ \E c \in 1..MaxNodes : PowDisconnect(c)
+    \/ \E c \in 1..MaxNodes : \E a \in 1..PowMaxContrib : PowSubmitWork(c, a)
     \/ PowEndEpoch
 
 \* Specification with weak fairness constraints.
@@ -256,8 +255,8 @@ PowSpec == PowInit /\ [][PowNext]_powVars /\ WF_powVars(PowEndEpoch)
 \* Restricts attackers to sub-threshold contributions only.
 \* Use this to verify Sybil-specific properties.
 SybilPowNext ==
-    \/ \E c \in PowClient : PowConnect(c)
-    \/ \E c \in PowClient : PowDisconnect(c)
+    \/ \E c \in 1..MaxNodes : PowConnect(c)
+    \/ \E c \in 1..MaxNodes : PowDisconnect(c)
     \/ \E c \in PowLegitimate :
          \E a \in 1..PowMaxContrib : PowSubmitWork(c, a)
     \/ \E c \in PowAttacker :
@@ -273,10 +272,10 @@ SybilPowSpec == PowInit /\ [][SybilPowNext]_powVars /\ WF_powVars(PowEndEpoch)
 \* --- Type correctness ---
 PowTypeOK ==
     /\ powEpoch \in 0..PowMaxEpochs
-    /\ powActive \subseteq PowClient
-    /\ \A c \in PowClient : powContrib[c] \in 0..PowMaxContrib
-    /\ \A c \in PowClient : powTenure[c] >= 0
-    /\ \A c \in PowClient : powAlloc[c] >= 0
+    /\ powActive \subseteq 1..MaxNodes
+    /\ \A c \in 1..MaxNodes : powContrib[c] \in 0..PowMaxContrib
+    /\ \A c \in 1..MaxNodes : powTenure[c] >= 0
+    /\ \A c \in 1..MaxNodes : powAlloc[c] >= 0
 
 \* --- I1: Total allocation never exceeds capacity ---
 \* THE fundamental safety property. If this fails, the system is
@@ -284,7 +283,7 @@ PowTypeOK ==
 \* Try removing the normalization step in ComputeAlloc to see
 \* TLC find a violation.
 PowTotalAllocationBound ==
-    SetSum(PowClient, powAlloc) <= PowCapacity
+    SetSum(1..MaxNodes, powAlloc) <= PowCapacity
 
 \* --- I2: No single client exceeds allocation cap ---
 \* Anti-monopolization: even with overwhelming hashrate, a single
@@ -296,7 +295,7 @@ PowNoMonopolization ==
 \* --- I3: Disconnected clients have zero allocation ---
 \* Resources are immediately freed on disconnect.
 PowInactiveZero ==
-    \A c \in PowClient \ powActive : powAlloc[c] = 0
+    \A c \in 1..MaxNodes \ powActive : powAlloc[c] = 0
 
 \* --- I4: Allocation only from contribution ---
 \* If a client has non-zero allocation (which was computed in the prior epoch),
@@ -306,7 +305,7 @@ PowInactiveZero ==
 \*      and earned a minimum guarantee (eligible for sustained allocation)
 \* This ensures all allocation traces back to actual work or eligible tenure.
 PowAllocationFromWorkOrTenure ==
-    \A c \in PowClient :
+    \A c \in 1..MaxNodes :
         (powAlloc[c] > 0) => (powContrib[c] > 0 \/ powTenure[c] > 0)
             \* Either they contributed this epoch (powContrib > 0) or
             \* they earned it via tenure in a prior epoch (powTenure > 0)

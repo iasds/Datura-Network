@@ -2,8 +2,7 @@
 
 EXTENDS Naturals, FiniteSets, Sequences, PowAllocation
 
-CONSTANTS MaxNodes, NBSNodes, Hops, NDecoys, Empty
-ASSUME MaxNodes > 0
+CONSTANTS NBSNodes, Hops, NDecoys, Empty
 ASSUME NBSNodes < MaxNodes
 
 VARIABLES known_nodes, circuits, daturaAllocations
@@ -43,14 +42,22 @@ learn_nodes(n, peer) == /\ n/= peer
                 ]
              /\ UNCHANGED <<circuits, daturaAllocations, powVars>>
 
+PowConnectDatura(c) == PowConnect(c) /\ UNCHANGED daturaVars
+
+PowDisconnectDatura(c) == PowDisconnect(c) /\ UNCHANGED daturaVars
+
+PowSubmitWorkDatura(c, amount) == PowSubmitWork(c, amount) /\ UNCHANGED daturaVars
+
+PowEndEpochDatura == PowEndEpoch /\ UNCHANGED daturaVars
+
 Next == \/ (\E n \in 1..MaxNodes:
              \E peer \in 1..MaxNodes:
                /\ n /= peer
                /\ learn_nodes(n,peer))
-        \/ (\E c \in 1..MaxNodes : PowConnect(c) /\ UNCHANGED daturaVars)
-        \/ (\E c \in 1..MaxNodes : PowDisconnect(c) /\ UNCHANGED daturaVars)
-        \/ (\E c \in 1..MaxNodes : \E a \in 1..PowMaxContrib : PowSubmitWork(c, a) /\ UNCHANGED daturaVars)
-        \/ (PowEndEpoch /\ UNCHANGED daturaVars)
+        \/ (\E c \in 1..MaxNodes : PowConnectDatura(c))
+        \/ (\E c \in 1..MaxNodes : PowDisconnectDatura(c))
+        \/ (\E c \in 1..MaxNodes : \E a \in 1..PowMaxContrib : PowSubmitWorkDatura(c, a))
+        \/ PowEndEpochDatura
 
 Spec == Init /\ [][Next]_allVars /\ WF_allVars(Next)
 

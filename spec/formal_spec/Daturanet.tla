@@ -1,47 +1,53 @@
 ---------- MODULE Daturanet -----------
 
-EXTENDS Naturals, FiniteSets
+EXTENDS Naturals, FiniteSets,Sequences
 
-CONSTANTS Nodes, BootstrapNodes
-ASSUME BNinNodes == BootstrapNodes \subseteq Nodes
+CONSTANTS MaxNodes, NBSNodes, Hops, NDecoys, Empty,MaxAllocPermille
+ASSUME MaxNodes > 0
+ASSUME NBSNodes < MaxNodes
 
-VARIABLES known_nodes
+VARIABLES known_nodes, circuits, allocations
 
-vars == <<known_nodes>>
+vars == <<known_nodes, circuits, allocations>>
 
-InvTypeOK == /\ known_nodes \in [Nodes -> SUBSET Nodes]
-             /\ \A n \in Nodes: n \notin known_nodes[n]
 
-InvAlwaysKnowBootstrap == \A n \in Nodes: \E bn \in BootstrapNodes: bn /= n /\ bn \in known_nodes[n]
+InvKnownNodesOK == /\ known_nodes \in [1..MaxNodes -> SUBSET 1..MaxNodes]
+                   /\ \A n \in 1..MaxNodes: n \notin known_nodes[n]
 
-Invariants == InvTypeOK /\ InvAlwaysKnowBootstrap
+InvAlwaysKnowBootstrap == \A n \in 1..MaxNodes: \E bn \in 1..NBSNodes: bn /= n /\ bn \in known_nodes[n]
 
-Init == /\ known_nodes = [n \in Nodes |-> {CHOOSE bn \in BootstrapNodes: bn /= n}]
+InvAllocationsOK == /\ allocations \in [ 1..MaxNodes -> [ 1..MaxNodes -> 1..MaxAllocPermille ]]
+                    /\ \A n \in DOMAIN allocations: n \notin allocations[n]
 
-Next == \E n \in Nodes:
-          \E peer \in Nodes:
-            /\ n /= peer
+InvCircuitsOK == /\ circuits \in [1..MaxNodes -> SUBSET Seq(1..MaxNodes)]
+                /\ \A n \in DOMAIN circuits:
+                    \A c \in circuits[n]:
+                     /\ Len(c) = Hops
+                     /\ n \notin c
+
+Init == /\ known_nodes = [n \in 1..MaxNodes |-> {CHOOSE bn \in 1..NBSNodes: bn /= n}]
+        /\ allocations = [n \in 1..MaxNodes |-> {}]
+        /\ circuits = [n \in 1..MaxNodes |-> {}]
+
+learn_nodes(n, peer) == /\ n/= peer
             /\ known_nodes' = [
                    known_nodes EXCEPT 
                    ![n] = known_nodes[n] \cup {peer} \cup (known_nodes[peer] \ {n})
                ]
 
+Next == \E n \in 1..MaxNodes:
+          \E peer \in 1..MaxNodes:
+            /\ n /= peer
+            /\ \/ learn_nodes(n,peer)
+
 Spec == Init /\ [][Next]_vars /\ WF_vars(Next)
 
-EventuallyLearnNewNodes == <>\A n \in Nodes: 
+EventuallyLearnNewNodes == <>\A n \in 1..MaxNodes: 
                                 Cardinality(known_nodes[n]) > 1
-EventuallyLearnNonBootStrap == <>\A n \in Nodes:
-                                \E nb \in Nodes \ BootstrapNodes: 
+EventuallyLearnNonBootStrap == <>\A n \in 1..MaxNodes:
+                                \E nb \in 1..MaxNodes \ 1..NBSNodes: 
                                     nb \in known_nodes[n]
 
 Properties == EventuallyLearnNewNodes /\ EventuallyLearnNonBootStrap
-
-----
-
-THEOREM Spec => Invariants
-
-<1>1. Init => Invariants
-<1>2. Invariants /\ [Next]_vars => Invariants'
-<1>3. QED BY <1>1, <1>2 DEF Spec
 
 =========================================

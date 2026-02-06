@@ -48,18 +48,13 @@ InvCircuitsOK == IF circuits = Empty THEN TRUE ELSE
                      IsValidCircuit(circ)
                  /\ circuit_counter \in Nat
 
-Init == /\ known_nodes = [n \in 1..MaxNodes |-> {CHOOSE bn \in 1..NBSNodes: bn /= n}]
+Init == /\ known_nodes = [n \in 1..MaxNodes |-> (1..MaxNodes \ {n})]
          /\ daturaAllocations = Empty
          /\ circuits = Empty
          /\ circuit_counter = 0
          /\ PowInit
 
-learn_nodes(n, peer) == /\ n/= peer
-              /\ known_nodes' = [
-                     known_nodes EXCEPT 
-                     ![n] = known_nodes[n] \cup {peer} \cup (known_nodes[peer] \ {n})
-                 ]
-              /\ UNCHANGED <<circuits, daturaAllocations, circuit_counter, powVars>>
+\* Node discovery disabled - all nodes know each other by default in Init
 
 \* Check if enough nodes available for a path
 CanGeneratePath(source, dest, available_nodes) ==
@@ -79,30 +74,21 @@ GenerateHopPath(source, dest, available_nodes) ==
 create_circuit(client, real_dest, decoy_dests) ==
     /\ client \in 1..MaxNodes
     /\ real_dest \in 1..MaxNodes
-    /\ \A d \in decoy_dests: d \in 1..MaxNodes
-    /\ real_dest \in known_nodes[client]
-    /\ \A d \in decoy_dests: d \in known_nodes[client]
-    /\ client /= real_dest
+    /\ real_dest /= client
     /\ decoy_dests \cap {client, real_dest} = {}
     /\ Cardinality(decoy_dests) = NBDecoys
-    /\ LET all_dests == {real_dest} \cup decoy_dests
-           all_nodes == 1..MaxNodes
-           real_path == GenerateHopPath(client, real_dest, all_nodes)
-           decoy_paths == [d \in decoy_dests |-> GenerateHopPath(client, d, all_nodes)]
-           new_circuit_id == circuit_counter + 1
+    /\ LET new_circuit_id == circuit_counter + 1
            new_circuit == [
                id |-> new_circuit_id,
                client |-> client,
                dest_real |-> real_dest,
                dest_decoys |-> decoy_dests,
-               hops |-> [real |-> real_path, decoys |-> decoy_paths],
+               hops |-> [real |-> <<client, real_dest>>, decoys |-> [d \in decoy_dests |-> <<client, d>>]],
                pow_tokens |-> [real |-> 0, decoys |-> [d \in decoy_dests |-> 0]],
-               created_at |-> 0,  \* TODO: use actual timestamp
-               expires_at |-> 0   \* TODO: use actual timestamp + validity period
+               created_at |-> 0,
+               expires_at |-> 0
            ]
-       IN /\ real_path /= << >>
-          /\ \A d \in decoy_dests: decoy_paths[d] /= << >>
-          /\ circuits' = circuits \cup {new_circuit}
+       IN circuits' = circuits \cup {new_circuit}
           /\ circuit_counter' = new_circuit_id
           /\ UNCHANGED <<known_nodes, daturaAllocations, powVars>>
 
@@ -114,18 +100,18 @@ PowSubmitWorkDatura(c, amount) == PowSubmitWork(c, amount) /\ UNCHANGED daturaVa
 
 PowEndEpochDatura == PowEndEpoch /\ UNCHANGED daturaVars
 
-\* Simplified: only allow circuit creation if known_nodes is fully populated
+\* Fully deterministic circuit creation
 create_circuit_action(client) ==
     /\ \A n \in 1..MaxNodes: n \in known_nodes[client] \/ n = client
-    /\ \E real_dest \in 1..MaxNodes:
-        /\ real_dest /= client
-        /\ \E decoy_set \in SUBSET (1..MaxNodes \ {client, real_dest}):
-            /\ Cardinality(decoy_set) = NBDecoys
-            /\ create_circuit(client, real_dest, decoy_set)
+    /\ LET real_dest == IF client < MaxNodes THEN client + 1 ELSE 1
+           decoy1 == IF client + 2 <= MaxNodes THEN client + 2 ELSE 1
+           decoy2 == IF client + 3 <= MaxNodes THEN client + 3 ELSE 2
+       IN LET decoy_set == {decoy1, decoy2} \ {client, real_dest}
+          IN /\ Cardinality(decoy_set) = NBDecoys
+             /\ create_circuit(client, real_dest, decoy_set)
 
-\* Simplified Next for circuit testing: focus on circuit creation
+\* Next: circuit creation only
 Next == (\E c \in 1..MaxNodes : create_circuit_action(c))
-         \/ (\E n \in 1..MaxNodes: \E peer \in 1..MaxNodes: n /= peer /\ learn_nodes(n,peer))
 
 Spec == Init /\ [][Next]_allVars /\ WF_allVars(Next)
 

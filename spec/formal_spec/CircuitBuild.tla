@@ -2,11 +2,13 @@
 
 EXTENDS Naturals, Sequences, FiniteSets
 
-CONSTANTS TotalNodes, CircuitLen, Empty
+CONSTANTS TotalNodes, CircuitLen, Empty, MaxCircuits
 
 VARIABLES hs_intro_points, circuits, bridges
 
 vars == << hs_intro_points, circuits, bridges>>
+
+ASSUME MaxCircuits >= 1
 
 Nodes == 1..TotalNodes
 
@@ -15,7 +17,8 @@ HSipTypeOK == \/ hs_intro_points = Empty
               \/ /\ hs_intro_points \in [Nodes -> Nodes]
                  /\ \A n \in DOMAIN hs_intro_points: hs_intro_points[n] # n
 CircuitsTypeOK == \/ circuits = Empty
-                  \/ /\ \A c \in circuits:
+                  \/ /\ Cardinality(circuits) <= MaxCircuits
+                     /\ \A c \in circuits:
                         /\ c \in Seq(Nodes)
                         /\ Len(c) = CircuitLen
                         /\ Cardinality({c[i]: i \in DOMAIN c}) = CircuitLen
@@ -28,30 +31,44 @@ Init == /\ circuits = Empty
         /\ bridges = Empty
         /\ hs_intro_points = Empty
 
-SeqFromSet(S, n) ==
-  {f \in [1..n -> S]: Cardinality({f[i]: i \in DOMAIN f}) = n}
+\* Helper to convert set to sorted sequence
+SetToSortedSeq(S) ==
+  LET F[s \in SUBSET S] ==
+    IF s = {} THEN <<>>
+    ELSE LET x == CHOOSE x \in s: \A y \in s: x <= y
+         IN <<x>> \o F[s \ {x}]
+  IN F[S]
 
-BuildCircuit(src,dst) == /\ src # dst
-                         /\ src \in Nodes
-                         /\ dst \in Nodes
-                         /\ \E intermediaries \in SUBSET Nodes:
-                            /\ Cardinality(intermediaries) = CircuitLen - 2
-                            /\ src \notin intermediaries
-                            /\ dst \notin intermediaries
-                            /\ \E circuit \in SeqFromSet({src, dst} \cup intermediaries, CircuitLen):
-                              /\ circuit[1] = src
-                              /\ circuit[CircuitLen] = dst
-                              /\ circuits' = IF circuits = Empty THEN {circuit} ELSE circuits \cup {circuit}
-                         /\ UNCHANGED << hs_intro_points, bridges>>
+\* Build circuit with deterministic ordering: src -> sorted intermediaries -> dst
+BuildCircuit(src, dst) ==
+  /\ src # dst
+  /\ src \in Nodes
+  /\ dst \in Nodes
+  /\ \E intermediary \in Nodes \ {src, dst}:
+     LET circuit == <<src, intermediary, dst>>
+     IN /\ circuits' = IF circuits = Empty
+                       THEN {circuit}
+                       ELSE circuits \cup {circuit}
+  /\ UNCHANGED << hs_intro_points, bridges>>
 
-AddCircuit == \E src, dst \in Nodes:
-              /\ src # dst
-              /\ IF circuits # Empty
-                 THEN ~\E c \in circuits: {c[1], c[CircuitLen]} = {src, dst}
-                 ELSE TRUE
-              /\ BuildCircuit(src, dst)
+CanAddCircuit == IF circuits = Empty
+                 THEN TRUE
+                 ELSE Cardinality(circuits) < MaxCircuits
 
-Next == AddCircuit
+AddCircuit == /\ CanAddCircuit
+              /\ \E src, dst \in Nodes:
+                 /\ src # dst
+                 /\ IF circuits # Empty
+                    THEN ~\E c \in circuits: {c[1], c[CircuitLen]} = {src, dst}
+                    ELSE TRUE
+                 /\ BuildCircuit(src, dst)
+
+\* Allow termination when max circuits reached
+Terminated == /\ circuits # Empty
+              /\ Cardinality(circuits) = MaxCircuits
+              /\ UNCHANGED vars
+
+Next == AddCircuit \/ Terminated
 
 Spec == Init /\ [][Next]_vars
 

@@ -1,21 +1,40 @@
 ----- MODULE CircuitBuild -----
 
-EXTENDS Naturals, Sequences, FiniteSets
+EXTENDS Naturals, Sequences, FiniteSets, TLC
 
-CONSTANTS TotalNodes, CircuitLen, Empty, MaxCircuits
+CONSTANTS TotalNodes, CircuitLen, Empty, MaxCircuits, HiddenServiceNodes, MaxIntroPoints
 
-VARIABLES hs_intro_points, circuits, bridges
+VARIABLES hs_intro_points, circuits, bridges, hs_to_intro_circuits
 
-vars == << hs_intro_points, circuits, bridges>>
+vars == << hs_intro_points, circuits, bridges, hs_to_intro_circuits>>
 
 ASSUME MaxCircuits >= 1
+ASSUME HiddenServiceNodes \subseteq 1..TotalNodes
+ASSUME MaxIntroPoints >= 1
 
 Nodes == 1..TotalNodes
 
 
+\* hs_intro_points: maps each hidden service node to its set of introduction points
 HSipTypeOK == \/ hs_intro_points = Empty
-              \/ /\ hs_intro_points \in [Nodes -> Nodes]
-                 /\ \A n \in DOMAIN hs_intro_points: hs_intro_points[n] # n
+              \/ /\ DOMAIN hs_intro_points \subseteq HiddenServiceNodes
+                 /\ \A hs \in DOMAIN hs_intro_points:
+                    /\ hs_intro_points[hs] \subseteq Nodes
+                    /\ hs \notin hs_intro_points[hs]  \* HS cannot be its own intro point
+                    /\ Cardinality(hs_intro_points[hs]) <= MaxIntroPoints
+
+\* hs_to_intro_circuits: circuits from hidden service to each of its introduction points
+\* Structure: set of records [hs: Node, intro: Node, circuit: Seq(Nodes)]
+HSToIntroCircuitsTypeOK ==
+    \/ hs_to_intro_circuits = Empty
+    \/ \A c \in hs_to_intro_circuits:
+        /\ c.hs \in HiddenServiceNodes
+        /\ c.intro \in Nodes
+        /\ c.hs # c.intro
+        /\ c.circuit \in Seq(Nodes)
+        /\ Len(c.circuit) = CircuitLen
+        /\ c.circuit[1] = c.hs           \* Circuit starts at HS
+        /\ c.circuit[CircuitLen] = c.intro  \* Circuit ends at intro point
 CircuitsTypeOK == \/ circuits = Empty
                   \/ /\ Cardinality(circuits) <= MaxCircuits
                      /\ \A c \in circuits:
@@ -30,6 +49,7 @@ BridgesTypeOK == \/ bridges = Empty
 Init == /\ circuits = Empty
         /\ bridges = Empty
         /\ hs_intro_points = Empty
+        /\ hs_to_intro_circuits = Empty
 
 \* Helper to convert set to sorted sequence
 SetToSortedSeq(S) ==
@@ -49,7 +69,49 @@ BuildCircuit(src, dst) ==
      IN /\ circuits' = IF circuits = Empty
                        THEN {circuit}
                        ELSE circuits \cup {circuit}
-  /\ UNCHANGED << hs_intro_points, bridges>>
+  /\ UNCHANGED << hs_intro_points, bridges, hs_to_intro_circuits>>
+
+\* ============================================================================
+\* HIDDEN SERVICE ACTIONS
+\* ============================================================================
+
+\* Get current intro points for a hidden service (handles Empty case)
+GetHSIntroPoints(hs) ==
+    IF hs_intro_points = Empty THEN {}
+    ELSE IF hs \in DOMAIN hs_intro_points THEN hs_intro_points[hs]
+    ELSE {}
+
+\* Check if a hidden service can add more introduction points
+CanAddIntroPoint(hs) ==
+    /\ hs \in HiddenServiceNodes
+    /\ Cardinality(GetHSIntroPoints(hs)) < MaxIntroPoints
+
+\* Hidden service selects an introduction point and creates a circuit to it
+\* This models I2P-style hidden service setup where HS creates circuits to intro points
+SelectIntroPoint(hs, intro_point) ==
+    /\ CanAddIntroPoint(hs)
+    /\ intro_point \in Nodes
+    /\ intro_point # hs
+    /\ intro_point \notin GetHSIntroPoints(hs)  \* Not already an intro point
+    \* Create the circuit from HS to intro point through an intermediary
+    /\ \E intermediary \in Nodes \ {hs, intro_point}:
+        LET new_circuit == <<hs, intermediary, intro_point>>
+            new_circuit_record == [hs |-> hs, intro |-> intro_point, circuit |-> new_circuit]
+        IN /\ hs_to_intro_circuits' = IF hs_to_intro_circuits = Empty
+                                       THEN {new_circuit_record}
+                                       ELSE hs_to_intro_circuits \cup {new_circuit_record}
+           /\ hs_intro_points' = IF hs_intro_points = Empty
+                                  THEN [h \in {hs} |-> {intro_point}]
+                                  ELSE IF hs \in DOMAIN hs_intro_points
+                                       THEN [hs_intro_points EXCEPT ![hs] = @ \cup {intro_point}]
+                                       ELSE hs_intro_points @@ (hs :> {intro_point})
+    /\ UNCHANGED <<circuits, bridges>>
+
+\* Action: any hidden service node can select a new introduction point
+HSSelectIntroPoint ==
+    \E hs \in HiddenServiceNodes:
+    \E intro \in Nodes \ {hs}:
+        SelectIntroPoint(hs, intro)
 
 CanAddCircuit == IF circuits = Empty
                  THEN TRUE
@@ -63,13 +125,44 @@ AddCircuit == /\ CanAddCircuit
                     ELSE TRUE
                  /\ BuildCircuit(src, dst)
 
-\* Allow termination when max circuits reached
+\* Check if all hidden services have reached max intro points
+AllHSHaveMaxIntroPoints ==
+    \A hs \in HiddenServiceNodes:
+        Cardinality(GetHSIntroPoints(hs)) = MaxIntroPoints
+
+\* Allow termination when max circuits reached AND all HS have their intro points
 Terminated == /\ circuits # Empty
               /\ Cardinality(circuits) = MaxCircuits
+              /\ AllHSHaveMaxIntroPoints
               /\ UNCHANGED vars
 
-Next == AddCircuit \/ Terminated
+Next == AddCircuit \/ HSSelectIntroPoint \/ Terminated
 
 Spec == Init /\ [][Next]_vars
+
+\* ============================================================================
+\* HIDDEN SERVICE INVARIANTS
+\* ============================================================================
+
+\* Every intro point must have a corresponding circuit from its HS
+IntroPointHasCircuit ==
+    hs_intro_points # Empty =>
+    \A hs \in DOMAIN hs_intro_points:
+        \A intro \in hs_intro_points[hs]:
+            hs_to_intro_circuits # Empty /\
+            \E c \in hs_to_intro_circuits:
+                c.hs = hs /\ c.intro = intro
+
+\* Circuit must exist for each registered intro point
+CircuitIntroConsistency ==
+    hs_to_intro_circuits # Empty =>
+    \A c \in hs_to_intro_circuits:
+        hs_intro_points # Empty /\
+        c.hs \in DOMAIN hs_intro_points /\
+        c.intro \in hs_intro_points[c.hs]
+
+\* Hidden service nodes must be valid
+HSNodesValid ==
+    \A hs \in HiddenServiceNodes: hs \in Nodes
 
 ===============================

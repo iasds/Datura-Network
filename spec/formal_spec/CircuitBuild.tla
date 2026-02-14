@@ -4,9 +4,9 @@ EXTENDS Naturals, Sequences, FiniteSets, TLC
 
 CONSTANTS TotalNodes, CircuitLen, Empty, MaxCircuits, HiddenServiceNodes, MaxIntroPoints
 
-VARIABLES hs_intro_points, circuits, bridges, hs_to_intro_circuits, next_br_cookie
+VARIABLES hs_intro_points, circuits, bridges, hs_to_intro_circuits
 
-vars == << hs_intro_points, circuits, bridges, hs_to_intro_circuits, next_br_cookie>>
+vars == << hs_intro_points, circuits, bridges, hs_to_intro_circuits>>
 
 ASSUME MaxCircuits >= 1
 ASSUME HiddenServiceNodes \subseteq 1..TotalNodes
@@ -50,7 +50,6 @@ Init == /\ circuits = Empty
         /\ bridges = Empty
         /\ hs_intro_points = Empty
         /\ hs_to_intro_circuits = Empty
-        /\ next_br_cookie = 0
 
 \* Helper to convert set to sorted sequence
 SetToSortedSeq(S) ==
@@ -61,8 +60,7 @@ SetToSortedSeq(S) ==
   IN F[S]
 
 \* Build circuit with deterministic ordering: src -> sorted intermediaries -> dst
-\* br_cookie parameter is for tracking purposes but not stored in circuit
-BuildCircuit(src, dst, br_cookie) ==
+BuildCircuit(src, dst) ==
   /\ src # dst
   /\ src \in Nodes
   /\ dst \in Nodes
@@ -107,7 +105,7 @@ SelectIntroPoint(hs, intro_point) ==
                                   ELSE IF hs \in DOMAIN hs_intro_points
                                        THEN [hs_intro_points EXCEPT ![hs] = @ \cup {intro_point}]
                                        ELSE hs_intro_points @@ (hs :> {intro_point})
-    /\ UNCHANGED <<circuits, bridges, next_br_cookie>>
+    /\ UNCHANGED <<circuits, bridges>>
 
 \* Action: any hidden service node can select a new introduction point
 HSSelectIntroPoint ==
@@ -125,8 +123,7 @@ AddCircuit == /\ CanAddCircuit
                  /\ IF circuits # Empty
                     THEN ~\E c \in circuits: {c[1], c[CircuitLen]} = {src, dst}
                     ELSE TRUE
-                 /\ BuildCircuit(src, dst, next_br_cookie)
-                 /\ next_br_cookie' = next_br_cookie + 1
+                 /\ BuildCircuit(src, dst)
 
 \* Add a bridge linking two circuits at a rendezvous node
 \* This connects client circuit to HS circuit through the rendezvous node
@@ -137,7 +134,7 @@ AddBridge(c1, c2) ==
     /\ bridges' = IF bridges = Empty
                   THEN c1 :> c2
                   ELSE bridges @@ (c1 :> c2)
-    /\ UNCHANGED <<circuits, hs_intro_points, hs_to_intro_circuits, next_br_cookie>>
+    /\ UNCHANGED <<circuits, hs_intro_points, hs_to_intro_circuits>>
 
 ConnectHiddenService == \E n \in Nodes:
                          \E hs \in HiddenServiceNodes:
@@ -157,7 +154,6 @@ ConnectHiddenService == \E n \in Nodes:
                                   /\ bridges' = IF bridges = Empty
                                                 THEN client_to_rv :> hs_to_rv
                                                 ELSE bridges @@ (client_to_rv :> hs_to_rv)
-                                  /\ next_br_cookie' = next_br_cookie + 3
                                   /\ UNCHANGED <<hs_intro_points, hs_to_intro_circuits>>
 
 \* Check if all hidden services have reached max intro points

@@ -61,12 +61,13 @@ SetToSortedSeq(S) ==
   IN F[S]
 
 \* Build circuit with deterministic ordering: src -> sorted intermediaries -> dst
+\* br_cookie parameter is for tracking purposes but not stored in circuit
 BuildCircuit(src, dst, br_cookie) ==
   /\ src # dst
   /\ src \in Nodes
   /\ dst \in Nodes
   /\ \E intermediary \in Nodes \ {src, dst}:
-     LET circuit == <<src, intermediary, dst, br_cookie>>
+     LET circuit == <<src, intermediary, dst>>
      IN /\ circuits' = IF circuits = Empty
                        THEN {circuit}
                        ELSE circuits \cup {circuit}
@@ -106,7 +107,7 @@ SelectIntroPoint(hs, intro_point) ==
                                   ELSE IF hs \in DOMAIN hs_intro_points
                                        THEN [hs_intro_points EXCEPT ![hs] = @ \cup {intro_point}]
                                        ELSE hs_intro_points @@ (hs :> {intro_point})
-    /\ UNCHANGED <<circuits, bridges>>
+    /\ UNCHANGED <<circuits, bridges, next_br_cookie>>
 
 \* Action: any hidden service node can select a new introduction point
 HSSelectIntroPoint ==
@@ -127,16 +128,37 @@ AddCircuit == /\ CanAddCircuit
                  /\ BuildCircuit(src, dst, next_br_cookie)
                  /\ next_br_cookie' = next_br_cookie + 1
 
+\* Add a bridge linking two circuits at a rendezvous node
+\* This connects client circuit to HS circuit through the rendezvous node
+AddBridge(c1, c2) ==
+    /\ c1 \in circuits
+    /\ c2 \in circuits
+    /\ c1 # c2
+    /\ bridges' = IF bridges = Empty
+                  THEN c1 :> c2
+                  ELSE bridges @@ (c1 :> c2)
+    /\ UNCHANGED <<circuits, hs_intro_points, hs_to_intro_circuits, next_br_cookie>>
+
 ConnectHiddenService == \E n \in Nodes:
                          \E hs \in HiddenServiceNodes:
-                          \E i \in GetHSIntroPoint(hs)
-                           /\ BuildCircuit(n,i)
-                           /\ \E rv \in Nodes:
-                             rv # n
-                             /\ BuildCircuit(hs, rv,next_br_cookie)
-                             /\ BuildCircuit(n, rv, next_br_cookie)
-                             /\ AddBridge(rv, next_br_cookie)
-                             /\ next_br_cookie' = next_br_cookie + 1
+                          \E i \in GetHSIntroPoints(hs):
+                           \E intermediary1 \in Nodes \ {n, i}:
+                            \E rv \in Nodes:
+                             \E intermediary2 \in Nodes \ {hs, rv}:
+                              \E intermediary3 \in Nodes \ {n, rv}:
+                               LET client_to_intro == <<n, intermediary1, i>>
+                                   hs_to_rv == <<hs, intermediary2, rv>>
+                                   client_to_rv == <<n, intermediary3, rv>>
+                               IN /\ rv # n
+                                  /\ rv # hs
+                                  /\ circuits' = IF circuits = Empty
+                                                 THEN {client_to_intro, hs_to_rv, client_to_rv}
+                                                 ELSE circuits \cup {client_to_intro, hs_to_rv, client_to_rv}
+                                  /\ bridges' = IF bridges = Empty
+                                                THEN client_to_rv :> hs_to_rv
+                                                ELSE bridges @@ (client_to_rv :> hs_to_rv)
+                                  /\ next_br_cookie' = next_br_cookie + 3
+                                  /\ UNCHANGED <<hs_intro_points, hs_to_intro_circuits>>
 
 \* Check if all hidden services have reached max intro points
 AllHSHaveMaxIntroPoints ==

@@ -37,6 +37,62 @@ Models the gossip protocol for node discovery.
 - `EventuallyLearnNewNodes` - Nodes eventually discover new peers
 - `EventuallyLearnNonBootStrap` - Nodes eventually learn about non-bootstrap nodes
 
+### CircuitBuild.tla
+
+Models the circuit building protocol for anonymous communication, including hidden service connections via rendezvous nodes.
+
+**Key mechanisms:**
+- **3-hop circuits** - Fixed-length paths: `<<source, intermediary, destination>>`
+- **Hidden service introduction points** - HSes select and maintain circuits to publicly-advertised entry nodes
+- **Rendezvous-based connections** - Client and HS both connect to a common rendezvous node
+- **Circuit bridging** - Links two circuits at rendezvous for bidirectional communication
+
+**State variables:**
+- `circuits` - All network circuits (sequences of nodes)
+- `bridges` - Maps circuit → circuit at rendezvous nodes
+- `hs_intro_points` - Each hidden service's introduction points
+- `hs_to_intro_circuits` - Circuits from HSes to their intro points
+
+**Actions:**
+- `AddCircuit` - Generic circuit creation between any two nodes
+- `SelectIntroPoint` - Hidden service selects intro point and creates circuit to it
+- `ConnectHiddenService` - Full client-to-HS connection via rendezvous protocol
+  1. Client connects to HS's introduction point
+  2. Creates three circuits: client→intro, hs→rv, client→rv
+  3. Bridges client_to_rv → hs_to_rv at rendezvous node
+- `AddBridge` - Links two circuits at a rendezvous node
+
+**Verified invariants:**
+- `HSipTypeOK` - Hidden service intro points well-formed (≤ MaxIntroPoints, HS not its own intro)
+- `HSToIntroCircuitsTypeOK` - HS-to-intro circuits valid (start at HS, end at intro, correct length)
+- `CircuitsTypeOK` - All circuits valid (≤ MaxCircuits, unique nodes, length = CircuitLen)
+- `BridgesTypeOK` - Bridge mappings valid (no self-bridges)
+- `IntroPointHasCircuit` - Every intro point has a corresponding HS circuit
+- `CircuitIntroConsistency` - Every HS-to-intro circuit has a registered intro point
+- `HSNodesValid` - All hidden service nodes are valid network nodes
+
+**Protocol modeled from specification:**
+- Hidden Services (spec lines 165-287)
+- Rendezvous Nodes (spec lines 229-241)
+- Bidirectional Communication (spec lines 288-299)
+
+**Abstractions:**
+- Encryption assumed (not modeled)
+- PoW challenges not included (separate concern)
+- DHT routing simplified to direct node selection
+- Decoy destinations not yet modeled
+
+**Configuration** (`CircuitBuild.cfg`):
+```
+TotalNodes = 4          # Total network nodes
+CircuitLen = 3          # Fixed at 3 hops
+MaxCircuits = 2         # Circuit limit
+HiddenServiceNodes = {1}# Which nodes are HSes
+MaxIntroPoints = 2      # Max intros per HS
+```
+
+**State space:** ~20k states in ~2s with default config
+
 ## Running the Model Checker
 
 Requires TLC (part of the TLA+ toolbox). On NixOS: `nix-shell -p tlaplus`
@@ -44,7 +100,14 @@ Requires TLC (part of the TLA+ toolbox). On NixOS: `nix-shell -p tlaplus`
 ### Basic usage
 
 ```bash
+# Check the PoW allocation spec
 tlc PowAllocation.tla -config PowAllocation.cfg -workers auto
+
+# Check the circuit building spec
+tlc CircuitBuild.tla -config CircuitBuild.cfg -workers auto
+
+# Check the gossip protocol spec
+tlc Daturanet.tla -config Daturanet.cfg -workers auto
 ```
 
 ### Options

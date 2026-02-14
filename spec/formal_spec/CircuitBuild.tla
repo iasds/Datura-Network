@@ -4,9 +4,9 @@ EXTENDS Naturals, Sequences, FiniteSets, TLC
 
 CONSTANTS TotalNodes, CircuitLen, Empty, MaxCircuits, HiddenServiceNodes, MaxIntroPoints
 
-VARIABLES hs_intro_points, circuits, bridges, hs_to_intro_circuits
+VARIABLES hs_intro_points, circuits, bridges, hs_to_intro_circuits, next_br_cookie
 
-vars == << hs_intro_points, circuits, bridges, hs_to_intro_circuits>>
+vars == << hs_intro_points, circuits, bridges, hs_to_intro_circuits, next_br_cookie>>
 
 ASSUME MaxCircuits >= 1
 ASSUME HiddenServiceNodes \subseteq 1..TotalNodes
@@ -50,6 +50,7 @@ Init == /\ circuits = Empty
         /\ bridges = Empty
         /\ hs_intro_points = Empty
         /\ hs_to_intro_circuits = Empty
+        /\ next_br_cookie = 0
 
 \* Helper to convert set to sorted sequence
 SetToSortedSeq(S) ==
@@ -60,12 +61,12 @@ SetToSortedSeq(S) ==
   IN F[S]
 
 \* Build circuit with deterministic ordering: src -> sorted intermediaries -> dst
-BuildCircuit(src, dst) ==
+BuildCircuit(src, dst, br_cookie) ==
   /\ src # dst
   /\ src \in Nodes
   /\ dst \in Nodes
   /\ \E intermediary \in Nodes \ {src, dst}:
-     LET circuit == <<src, intermediary, dst>>
+     LET circuit == <<src, intermediary, dst, br_cookie>>
      IN /\ circuits' = IF circuits = Empty
                        THEN {circuit}
                        ELSE circuits \cup {circuit}
@@ -123,7 +124,19 @@ AddCircuit == /\ CanAddCircuit
                  /\ IF circuits # Empty
                     THEN ~\E c \in circuits: {c[1], c[CircuitLen]} = {src, dst}
                     ELSE TRUE
-                 /\ BuildCircuit(src, dst)
+                 /\ BuildCircuit(src, dst, next_br_cookie)
+                 /\ next_br_cookie' = next_br_cookie + 1
+
+ConnectHiddenService == \E n \in Nodes:
+                         \E hs \in HiddenServiceNodes:
+                          \E i \in GetHSIntroPoint(hs)
+                           /\ BuildCircuit(n,i)
+                           /\ \E rv \in Nodes:
+                             rv # n
+                             /\ BuildCircuit(hs, rv,next_br_cookie)
+                             /\ BuildCircuit(n, rv, next_br_cookie)
+                             /\ AddBridge(rv, next_br_cookie)
+                             /\ next_br_cookie' = next_br_cookie + 1
 
 \* Check if all hidden services have reached max intro points
 AllHSHaveMaxIntroPoints ==

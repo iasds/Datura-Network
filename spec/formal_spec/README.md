@@ -59,7 +59,7 @@ Models the circuit building protocol for anonymous communication, including hidd
 - `ConnectHiddenService` - Full client-to-HS connection via rendezvous protocol
   1. Client connects to HS's introduction point
   2. Creates three circuits: client→intro, hs→rv, client→rv
-  3. Bridges client_to_rv → hs_to_rv at rendezvous node
+  3. Bridges client_to_rdv → hs_to_rdv at rendezvous node
 - `AddBridge` - Links two circuits at a rendezvous node
 
 **Verified invariants:**

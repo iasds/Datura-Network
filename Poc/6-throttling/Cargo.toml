@@ -1,0 +1,17 @@
+[package]
+name = "throttling"
+version = "0.1.0"
+edition = "2024"
+
+[[bin]]
+name = "server"
+
+[[bin]]
+name = "client"
+
+[dependencies]
+getrandom = "0.3.4"
+# another poc is already using tokio so it's probably fine.
+leaky-bucket = "1.1.2"
+randomx-rs = "1.4.1"
+tokio = { version = "1.49.0", features = ["full"] }

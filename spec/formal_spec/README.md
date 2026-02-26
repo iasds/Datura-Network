@@ -62,6 +62,71 @@ Models the circuit building protocol for anonymous communication, including hidd
   3. Bridges client_to_rdv → hs_to_rdv at rendezvous node
 - `AddBridge` - Links two circuits at a rendezvous node
 
+**Introduction Point Role (I2P-style):**
+
+Introduction points are nodes that act as publicly-advertised entry gateways for hidden services. They enable clients to initiate connections to a hidden service without knowing the HS's actual location.
+
+**How introduction points work:**
+
+1. **Selection phase** (`SelectIntroPoint` action):
+   - The hidden service chooses a node to become an introduction point
+   - Constraints enforced:
+     - `intro_point ≠ hs` (intro point cannot be the HS itself)
+     - `intro_point ∉ GetHSIntroPoints(hs)` (no duplicates)
+     - `Cardinality(GetHSIntroPoints(hs)) < MaxIntroPoints` (max limit enforced)
+
+2. **Circuit establishment**:
+   - The HS proactively creates a circuit to each introduction point
+   - Circuit structure: `<<hs, intermediary, intro_point>>`
+   - The intermediary node is chosen from `Nodes \ {hs, intro_point}`
+   - This 3-hop circuit provides anonymity - the intro point doesn't know it's talking to the HS
+
+3. **State tracking**:
+   - `hs_intro_points[hs]` stores the set of intro points for each HS
+   - `hs_to_intro_circuits` contains records: `[hs: Node, intro: Node, circuit: Seq(Nodes)]`
+   - Each circuit starts at the HS and ends at the intro point
+
+4. **Consistency guarantees** (enforced by invariants):
+   - Every registered intro point must have a corresponding circuit (`IntroPointHasCircuit`)
+   - Every HS-to-intro circuit must reference a registered intro point (`CircuitIntroConsistency`)
+   - This ensures the HS always maintains connectivity to its published introduction points
+
+**Purpose**: Introduction points serve as stable, public entry nodes that clients can discover (e.g., via DHT) without learning the hidden service's actual location. The HS maintains ready-made circuits to these points, enabling it to quickly receive connection initiation requests from clients.
+
+**Client-to-Hidden-Service Connection Protocol:**
+
+The `ConnectHiddenService` action models the full connection establishment between a client and hidden service using the rendezvous pattern. This protocol enables bidirectional communication while preserving anonymity for both parties.
+
+**Protocol steps:**
+
+1. **Client discovers introduction point**:
+   - Client learns about the HS's introduction point(s) (e.g., via DHT lookup)
+   - Client selects one intro point `i` from `hs_intro_points[hs]`
+
+2. **Client contacts introduction point**:
+   - Client creates circuit: `client_to_intro = <<client, intermediary1, intro_point>>`
+   - Client sends rendezvous point ID through this circuit to the intro point
+   - Intro point relays the rendezvous request to the HS via the pre-established HS→intro circuit
+
+3. **Both parties connect to rendezvous**:
+   - Hidden service creates circuit: `hs_to_rdv = <<hs, intermediary2, rendezvous>>`
+   - Client creates circuit: `client_to_rdv = <<client, intermediary3, rendezvous>>`
+   - Note: Both use different intermediaries for additional anonymity
+
+4. **Bridge establishment at rendezvous node**:
+   - The rendezvous node creates a bridge: `bridges[client_to_rv] = hs_to_rv`
+   - This links the two circuits, enabling bidirectional communication
+   - Traffic from client→rdv is forwarded to hs→rdv and vice versa
+
+**Key properties:**
+- The rendezvous node doesn't know which endpoint is the client vs the HS
+- The introduction point only sees the client's request, not the actual communication
+- The HS doesn't learn the client's identity (IP/node)
+- The client doesn't learn the HS's location (node)
+- All circuits are 3-hops for consistent anonymity properties
+
+**Current implementation status**: The `ConnectHiddenService` action is defined (CircuitBuild.tla:139-157) but not currently enabled in the `Next` state transition. The spec currently focuses on verifying the introduction point setup (`HSSelectIntroPoint`) and basic circuit building (`AddCircuit`).
+
 **Verified invariants:**
 - `HSipTypeOK` - Hidden service intro points well-formed (≤ MaxIntroPoints, HS not its own intro)
 - `HSToIntroCircuitsTypeOK` - HS-to-intro circuits valid (start at HS, end at intro, correct length)

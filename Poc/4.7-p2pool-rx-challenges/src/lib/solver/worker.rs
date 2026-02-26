@@ -192,7 +192,7 @@ impl Worker {
                     }
                     if best_solution.2 >= target_diff && !best_solution.1.is_empty() {
                         self.job_results
-                            .blocking_send(SolverResult::Solved((best_solution.0, best_solution.1)))
+                            .blocking_send(SolverResult::Valid((best_solution.0, best_solution.1)))
                             .unwrap();
                     }
                 }

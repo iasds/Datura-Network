@@ -1,0 +1,17 @@
+[package]
+name = "variable_pricing"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+path = "src/lib.rs"
+
+[dev-dependencies]
+proptest = "1.9.0"
+rand = "0.8"
+
+[dependencies]
+opentelemetry = "0.31.0"
+thiserror = "2.0.17"
+tokio = { version = "1.49.0", features = ["full"]}
+tracing = "0.1.44"

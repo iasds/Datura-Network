@@ -1,0 +1,21 @@
+[package]
+name = "xmr-pow-challenges"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+name="xmr_pow_challenges"
+path = "src/lib/mod.rs"
+
+[dependencies]
+hex = "0.4.3"
+num-bigint = "0.4.6"
+num-traits = "0.2.19"
+num_cpus = "1.17.0"
+proptest = "1.9.0"
+rand = "0.9.2"
+randomx-rs = "1.4.1"
+serde = {version ="1.0.228", features = ["derive"]}
+serde_json = "1.0.147"
+thiserror = "2.0.17"
+tokio = {version = "1.48.0",features = ["full"]}

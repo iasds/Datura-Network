@@ -31,8 +31,6 @@ fn handle_incoming(mut stream: TcpStream, nodes: NodeList) -> io::Result<()> {
 
     let connecting_node_addr = format!("{}:{}", connecting_node_ip, connecting_node_port);
 
-    println!("New node connected: {}", connecting_node_addr);
-
     let mut nodes = nodes.lock().unwrap();
 
     if !nodes.contains(&connecting_node_addr) {
@@ -42,13 +40,11 @@ fn handle_incoming(mut stream: TcpStream, nodes: NodeList) -> io::Result<()> {
     let nodes_list_str = nodes.join("\n");
     stream.write_all(nodes_list_str.as_bytes())?;
 
-    println!("Current nodes: {:?}", nodes);
     Ok(())
 }
 
 fn connect(bootstrap_addr: &str, my_port: &str, nodes: NodeList) -> io::Result<()> {
     let mut stream = TcpStream::connect(bootstrap_addr)?;
-    println!("Connected to bootstrap node {}", bootstrap_addr);
 
     stream.write_all(my_port.as_bytes())?;
     stream.shutdown(std::net::Shutdown::Write)?;
@@ -66,14 +62,11 @@ fn connect(bootstrap_addr: &str, my_port: &str, nodes: NodeList) -> io::Result<(
         }
     }
 
-    println!("Nodes after sync: {:?}", nodes);
-
     Ok(())
 }
 
 fn listen(port: &str, nodes: NodeList) -> io::Result<()> {
     let listener = TcpListener::bind(format!("0.0.0.0:{}", port))?;
-    println!("Listening on port {}", port);
 
     for stream in listener.incoming() {
         let stream = stream?;

@@ -1,8 +1,0 @@
-[package]
-name = "pow"
-version = "0.0.0"
-edition = "2024"
-
-[dependencies]
-randomx-rs = "1.4.1"
-getrandom = "0.3.4"

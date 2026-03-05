@@ -1,0 +1,21 @@
+{
+  "manifest_version": 3,
+  "name": "Datura PoC extension",
+  "version": "1.0",
+  "description": "Minimal PoC for the Datura firefox-based extension.",
+
+  "permissions": [ "privacy", "proxy", "storage" ],
+  "action": { "default_popup": "src/index.html" },
+  "background": {
+    "scripts": ["src/script.js"],
+    "service_worker": "src/script.js",
+    "type": "module"
+  },
+
+  "browser_specific_settings": {
+  "gecko": {
+    "id": "poc20@datura.network",
+    "strict_min_version": "91.1.0"
+  }
+}
+}

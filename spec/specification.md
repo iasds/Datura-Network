@@ -1,4 +1,4 @@
-# Datura Network Specification v0.3 (DRAFT)
+# Datura Network Specification v0.5.1 (DRAFT)
 
 ## The Threat Model
 
@@ -12,7 +12,7 @@ Global Passive Adversary (GPA) threats include multiple malicious Internet Servi
 
 ![alt text](image-33.png)
 
-The shape of the traffic (the size of the packets, **and especially the amount of data being sent and recieved**, the timing at which each packet is sent, the destination as of where the packets are going), these are all characteristics that the adversary can use to deanonymize users based on their traffic patterns.
+The shape of the traffic (the size of the packets, **and especially the amount of data being sent and received**, the timing at which each packet is sent, the destination as of where the packets are going), these are all characteristics that the adversary can use to deanonymize users based on their traffic patterns.
 
 The connection/traffic logging is also long-lived, and can span several months, and can be used to correlate that client A communicated with server B.
 
@@ -89,7 +89,7 @@ the path length of each connection is chosen at random.
 
 Each Node has a private key and a public key pair. The public Key is used by every other node to encrypt traffic that only the destination can decrypt.
 
-### Nodes Pay for other nodes to either route or recieve their traffic by solving RandomX Challenges
+### Nodes Pay for other nodes to either route or receive their traffic by solving RandomX Challenges
 
 ![alt text](image-4.png)
 
@@ -100,13 +100,15 @@ As a node, you will only accept to route traffic for other nodes if they manage 
 - A -> E : "Ok here's the randomX solution!" (E now unlocks the bandwidth from A to E to be 1mbps instead of 10kbps)
 - A <- E : "Ok valid answer, i accept to route 1gb of traffic for you, at 1mbps!"
 
+
+
 ### Clients choose where their connections go, including which Nodes are used as Decoy Destinations
 
 For every connection that clients make, they are choosing multiple hops, in this example there are 3. And for each real destination hop along the way, there are also 2 other decoy destinations where the traffic is being sent to:
 
 ![alt text](image-12.png)
 
-Every node along the way does not know what the traffic they recieve is for, until they try to decrypt it, where one of the 3 following scenarios can happen: 
+Every node along the way does not know what the traffic they receive is for, until they try to decrypt it, where one of the 3 following scenarios can happen: 
 
 - Either the node can decrypt the traffic and: 
     - either they forward the traffic to the next 3 nodes,
@@ -115,13 +117,50 @@ Every node along the way does not know what the traffic they recieve is for, unt
 
 Important sidenote, **these decoy destinations are remembered on the clientside for future use, because long-term passive traffic correllation attacks are in scope in the threat model.** If an adversary can monitor the traffic activity of all nodes on the network (from an external point of view), in case of decoy / hop nodes constantly changing, the only point in common over time of the connections would be Node A and Node I.
 
-### Nodes limit the bandwidth usage of other nodes to 10kbps by default, until they solve their PoW challenge.
+### Nodes limit the bandwidth usage of other nodes to 10kbps by default, until they solve their PoW challenge. (bandwidth unlocking procedures)
 
 ![alt text](image-6.png)
 
 By default, nodes cap incoming nodes traffic to 10kbps max, meaning just enough bandwidth to ask for randomX challenges and send their solutions. That way in case if a disruptive adversary tries to flood the network with traffic worth terabytes per second firepower, they can't do it due to the bandwidth constraints.
 
 The only way to widen the bandwidth is to solve the RandomX challenge of the given node you want to route the traffic through, you have to spend CPU power to be able to do that, and that only unlocks the bandwidth to a set amount, allowing a set amount of traffic to go through (like 1gb for example), and that's only valid for a set amount of time (24 hours for example).
+
+### Each Node on a circuit is responsible for checking the PoW solution sent by the source node is valid, to unlock bandwidth
+
+By default, nodes are communicating to each other at 10kbps max. This is to ensure that one adversary can't just consume all bandwidth at once sending junk traffic non-stop.
+
+To unlock the bandwidth to 1mbps, the source node has to solve the destination node's PoW challenge, following the 1-hop bandwidth unlocking procedure:
+
+![alt text](image-43.png)
+
+Blocking malicious traffic on 1-hop is easy because you know the source from where the malicious traffic came from, so you can easily block them on the IP layer (for example if the source node asks for the same PoW challenge too many times, or if the source node sends the wrong PoW solution too many times, both can be used as a justification to block the malicious node.)
+
+And to unlock the bandwidth to 1mbps on a multiple-hop setup, the source node needs to first complete the 1-hop bandwidth unlocking procedure before being able to go for the following 2-hop bandwidth unlocking procedure:
+
+![alt text](image-44.png)
+
+Here as you can see, the important part is that the intermediary nodes are responsible for:
+- relaying the next PoW's challenges back to the previous nodes
+- remembering the next PoW challenges
+- and especially checking the validity of the previous nodes' PoW solutions
+
+The fact that the nodes in between are responsible for checking the validity of PoW solutions that are being sent through them is crucial because it allows the destination Node to always be able to block malicious traffic. Either the traffic came from the malicious Source Node A, or the traffic came from a malicious node B which intentionally relayed Node A's malicious traffic, **this means that Node C blocking the node from which the malicious traffic came from is always legitimate**.
+
+A 3-hop bandwidth unlocking procedure requires the source node to first complete the 1-hop bandwidth unlocking procedure, and then the 2-hop bandwidth unlocking procedure:
+
+![alt text](image-45.png)
+
+### Nodes can make other nodes pay for services by making them solve PoW challenges coming from Monero's P2pool 
+
+To ensure that an adversary is disincentivized from attempting to DDoS the network, Datura nodes can retrieve PoW Challenges coming from Monero's P2Pool and make other nodes pay by solving those challenges.
+
+![alt text](image-46.png)
+
+This ensures the following 2 properties:
+- If a DDoS was being conducted by an adversary, that adversary would be forced to pay node runners by solving RandomX challenges for them
+- Node runners would receive financial compensation because those PoW challenges are in turn used to mine Monero
+
+In other words, what doesn't kill the network will essentially make it financially stronger
 
 ### Hidden Services (Vanity V3 addresses)
 
@@ -181,13 +220,13 @@ The real hidden services (which can be websites for example) are the ones that a
 
 ![alt text](image-13.png)
 
-Naturally, given the random nature of the non-default hidden services' hashes, those will point at different neighborhoods on the hashring. This does not mean that the node is placed anywhere else on the hashring, **the node's placement on the hashring is only determined by the it's default hidden service hash**
+Naturally, given the random nature of the non-default hidden services' hashes, those will point at different neighborhoods on the hashring. This does not mean that the node is placed anywhere else on the hashring, **the node's placement on the hashring is only determined by it's default hidden service hash**
 
 ![alt text](image-14.png)
 
 Nodes advertise themselves by their default hidden service's hash. In the above example, Node A's hash is 0EAWDAWDSWA, even if it also has 2 other non-default hidden services (whose hashes are W2AWDAWDSWA and 44AWDAWDSWA respectively).
 
-### Hidden Service Destinations can select Rendez-vous nodes to recieve traffic from the clients
+### Hidden Service Destinations can select Rendez-vous nodes to receive traffic from the clients
 
 Let's say you are the above Node A, you have a non-default hidden service which you intend to use to anonymously host your website, to be reachable at the `daturan24gtdy23lxd7ht3xzx6mi7mdlkabpvuefhrjn4t5jduviw5ad.dn` hidden service.
 
@@ -234,9 +273,9 @@ The problem here is that Node A needs Node S to continue routing the requests ba
 
 So this feature is meant to do just that: you can request Nodes to route traffic for you, based on the hash that's being requested to them, and you can tell them to route the traffic to other nodes asking for a different hash aswell:
 
-![alt text](image-8.png)
-
 ![alt text](image-9.png)
+
+![alt text](image-54.png)
 
 ![alt text](image-10.png)
 
@@ -244,15 +283,15 @@ So in our above example we get the following result if Node A asks nodes S, T an
 
 ![alt text](image-18.png)
 
-Thanks to this mechanism, Node A is able to recieve traffic meant for it's own hidden service, from it's designated rendezvous node(s) back to itself, **without revealing to neither Nodes S, T, or U that the requests are meant for the hidden service whose hash is 44AWDAWDSWA.**
+Thanks to this mechanism, Node A is able to receive traffic meant for it's own hidden service, from it's designated rendezvous node(s) back to itself, **without revealing to neither Nodes S, T, or U that the requests are meant for the hidden service whose hash is 44AWDAWDSWA.**
 
 ## Hidden Services are told where to route responses back to a rendezvous node chosen by the clients:
 
 ![alt text](image-20.png)
 
-In order for clients to recieve responses from hidden services, they have to tell them where to route traffic back to. 
+In order for clients to receive responses from hidden services, they have to tell them where to route traffic back to. 
 
-Therefore in the same fashion that hidden services pick a rendezvous node to be able to recieve traffic that's meant for them, we have clients choosing rendezvous nodes to be able to recieve traffic that's meant for them, coming from hidden service destinations, allowing them to remain anonymous from a potentially malicious hidden service.
+Therefore in the same fashion that hidden services pick a rendezvous node to be able to receive traffic that's meant for them, we have clients choosing rendezvous nodes to be able to receive traffic that's meant for them, coming from hidden service destinations, allowing them to remain anonymous from a potentially malicious hidden service.
 
 ![alt text](image-22.png)
 
@@ -304,7 +343,7 @@ The sequence to send requests to hidden services is as follows:
 
 2) Alice sends the information of what the traffic must look like to RDV Node D11, by going through RDV Node D1
 3) RDV Node D1, (which was chosen by the hidden service node B), routes the traffic to the decoy destinations
-4) All decoy destination nodes recieve the packet and are told to forward it back to the RDV node chosen by the client
+4) All decoy destination nodes receive the packet and are told to forward it back to the RDV node chosen by the client
 5) RDV Node D11, (which was chosen by the client A), forwards the message back to the decoy sources to tell them what the traffic they must send looks like
 6) all 8 sources (7 decoy sources, 1 real source), are told what the traffic they must send looks like, so they send it (only 1 traffic is real, the 7 others just send noise traffic that looks exactly the same from the outside)
 
@@ -312,7 +351,7 @@ The sequence to send requests to hidden services is as follows:
 
 7) now that all 8 sources are told what the traffic they must send looks like, they all send it to RDV node D1
 8) RDV Node D1 forwards the real traffic to all 8 Decoy Destinations (and discards the 7 other noise traffic)
-9) All 8 destinations recieve the same traffic
+9) All 8 destinations receive the same traffic
 
 End result: is that if Node B is a malicious hidden service with the monitoring capability of a global passive adversary, Client A is not deanonymizing themselves with their bandwidth consumption to that adversary because there is always an anonymity set of 1 out of 8 possible sources (7 of which are decoy sources), that have sent the same amount of traffic to the RDV node D1 (which was chosen by the hidden service).
 
@@ -333,10 +372,81 @@ To receive responses from hidden services, the sequence is the same except that 
 
 ![alt text](image-32.png)
 
-15) all Decoy Destinations recieved the information of how the response traffic should look like, so they send traffic that looks exactly like the real response from Node B
-16) All sources recieve the hidden service response, via RDV Node D11.
+15) all Decoy Destinations received the information of how the response traffic should look like, so they send traffic that looks exactly like the real response from Node B
+16) All sources receive the hidden service response, via RDV Node D11.
 
 End result: even if client Node A is a malicious adversary with the capabilities of a global passive adversary, they can't deanonymize Hidden service Node B via their bandwidth consumption because they always have an anonymity set of 1 out of 8 possible destinations (7 of which are decoy destinations), all 8 destinations have sent 50 Gb of traffic, and all 8 destinations have received 100Gb of traffic.
+
+### Incentives to run Datura Nodes (Theoretical Anonymity Set and Real Anonymity Set)
+
+as shown above, the targeted Anonymity set is a default of 1/8. But thing is, that's a theoretical anonymity set of 1/8 assuming that the adversary isn't running all of your nodes:
+
+![alt text](image-49.png)
+
+In the example above, the theoretical Anonymity set for Hidden Service Node B is 1/8 only If the adversary is not running the decoy nodes 2 to 8
+
+However if the adversary is running decoy nodes 2 to 8, then Hidden service Node B's anonymity set is 1/1, because the adversary is aware of what the decoy nodes are.
+
+Therefore, this is where the incentives to run Datura nodes comes in. We will make it clear to the users that **the only way to stop sybil deanonymization attacks is to use nodes that you trust (meaning nodes that you control) for the critical parts of your circuit.**
+
+If you don't control decoy nodes 2 to 8, then there will always be uncertainty regarding the legitimacy of those nodes, you will never know if a legit privacy advocate or the adversary is running them. 
+
+But if you're Bob and you control let's say Nodes 2, 3, and 4, and you ensure that your datura client always chooses them in your circuits as decoy destinations, then you have the following configuration:
+
+![alt text](image-47.png)
+
+Thanks to Bob running Nodes 2, 3 and 4, and using them as his decoy destinations, **Bob KNOWS that his anonymity set is at least 1/4** out of a total theorical 1/8 anonymity set.
+
+The Anonymity set for Hidden Service Node B is 1/8 only If the adversary is not running the decoy nodes 5 to 8. If the adversary is running the other decoy nodes 5 to 8 that bob doesn't have control of, then Hidden service Node B's anonymity set is 1/4. **The adversary anyway does not control the remaining Nodes 2,3 and 4 because those are under Bob's control.**
+
+Ideally, the user controls 8 nodes, to be able to have a non-theoretical anonymity set of 1/8:
+
+![alt text](image-50.png)
+
+**If Bob is running Nodes 2 to 8, and he is using them as his decoy destinations, therefore he KNOWS that his anonymity set is at least 1/8.** It doesn't matter If the adversary is running any other node in the circuit, the Hidden service Node B's anonymity set remains 1/8 because only Bob knows which node is the real destination (himself), and which other nodes are the decoy destinations.
+
+This distinction between theoretical anonymity set and real anonymity set will be constantly reminded to the users, **as long as they don't have a total of 8 trusted nodes to use as their decoy destinations.** This is to push users to run nodes to further decentralize the network and to use them as their decoy destinations. The users should not have to trust a random set of nodes that are not in their control, this is a fundamental requirement to be able to achieve online anonymity, it has a cost and we're always going to be 100% honest and upfront about it.
+
+### Verifying if the rest of the network nodes behave as intended 
+
+Sybil attacks in particular require that the network has a defined and strictly-enforced protocol that ensures any deviation from how the protocol is supposed to function serves as the basis to rejecting nodes.
+
+Given the context that you can't inspect that the adversary's nodes are running the datura binary, (as their customized client will always lie that they are running the binary of the correct hash for instance), you're anyway forced into treating the nodes that you don't control as a black box that you can't look into.
+
+The only thing we can do to ward off Sybil attacks is to ensure the protocol is strictly enforced and it's behavior to be easily verifiable from the outside.
+
+If you run only one node, your ability to verify that nodes behave as expected is fairly limited, as shown in the below example:
+
+![alt text](image-48.png)
+
+But given the context of allowing users to trust the other nodes that they run, we can expand our protocol-enforcement capabilities, for example if you run 2 nodes, you can now verify that nodes behave as expected when tasked to forward traffic for you, as decoy nodes:
+
+![alt text](image-51.png)
+
+Or in the following example where you run 3 nodes, you can verify the validity of the nodes behavior even better:
+
+![alt text](image-52.png)
+
+The easier the network protocol behavior is to verify on nodes from the outside, the better, because this means that any maliciously-operated node that exhibits deviations from how it should function can easily be rejected by the rest of the network.
+
+**This still does not stop the adversary from running a customized client on their infrastructure that does nothing more than logging connections without displaying any deviations from the protocol from the outside,** but that's a risk that we mitigate by ensuring that only the end users know where the decoy source nodes are, making sure that only the hidden service destinations know where the decoy destination nodes are, and by motivating the users to run their decoy nodes.
+
+### Gradual bandwidth allocation over 7 days
+
+First of all, this feature is there to avoid the sybil attack problem that i2p faces:
+
+![alt text](image-53.png)
+
+The bandwidth allocation and ability for nodes to be used to route traffic for other nodes is restricted based on their uptime, and is divided into 4 phases:
+
+- **phase 0 (0-1 day uptime):** your node is strictly only a client, your node can request other nodes (that have at least 24h uptime) to route traffic for you. And you only get a few rare nodes asking to route traffic for you (once every few hours) to test if your node is legit or not. You can get up to 100 nodes connections at a time, and use up to 10% of your available bandwidth.
+- **phase 1 (1-2 days uptime):** your node is now forced to mine a 30-minute long PoW to be officially listed amongst the rest of the available nodes to process traffic for the rest of the network. Your node starts to accept frequent nodes requests to route traffic, up to 1000 nodes connections at a time and use up to 30% of your available bandwidth.
+- **phase 2 (2-7 days uptime):** your node is now forced to mine a 30-minute long PoW again to enter phase 2, once completed, your node gradually accepts more and more routing requests up until it arrives at it's 100% bandwidth usage
+- **phase 3 (7-30 days uptime):**  your node is now forced to mine a 30-minute long PoW again to enter phase 3, once completed, your node knows what it's 100% bandwidth usage is and stays there accepting connections at that defined maximum rate for the next 23 days. (after those 23 days are over, the node switches back to Phase 2 again to re-evaluate it's maximal bandwidth capacity)
+
+The 30-minute long PoWs are there as a safeguard to prevent an adversary to attempting to spin up an extremely large amount of nodes to try and force all traffic through their nodes and centralize the network.
+
+Combined with monero's way of restricting the amount of nodes per IP subnet, this makes it extremely expensive for an adversary to conduct a sybil attack against the network.
 
 #### Bonus: Decoy Sources and Destinations combined with probabilistic path lengths:
 
@@ -364,6 +474,8 @@ If the clients or hidden service administrators choose, they can configure their
 
 Take note that this is also the smallest hashring that there can be on the datura network, there needs to be at least 4 nodes for the network to be able to function.
 
+
+
 ### Datura Exit Nodes to access other Darknets (like Tor and i2p)
 
 Datura Network will also enable users to talk to other darknets like Tor or i2p, thanks to exit nodes. There will be Datura nodes which will be marked as either Tor or i2p exit nodes:
@@ -384,7 +496,7 @@ Datura Exit node runners will be provided the following:
 
 - a complete tutorial on how to run clearnet exit nodes
 - a basic php / html website template to enable them to :
-    - list the tor exit nodes that are being ran by the administrator (this list is hidden by default)
+    - list the datura clearnet exit nodes that are being ran by the administrator (this list is hidden by default)
     - interface with a local monero node RPC
     - configure the cost of having an exit node revealed to the users
     - configure the amount of seats that a given exit node has (to restrict the maximum amount of users that can pay to get an exit node revealed to them)
@@ -409,3 +521,37 @@ The Adversary is essentially going to be forced to anonymously pay the exit node
 There will always be uncertainty in regards to the amount of exit nodes that have been rented out by legit users in the past, and the current amount of exit nodes that are yet to be rented out.
 
 Once an exit node is revealed to a user, all they need to do is use the given node's hash in their own node's configuration, to constantly route clearnet traffic to that node in particular.
+
+## PoW-based Resource Allocation (Variable Pricing)
+
+### What does it solve?
+
+The PoW-based resource allocation system addresses the threat of **Disruptive Adversary Threats (DDoS Attacks)** and **Active Adversary Threats (Sybil Attacks)** by making it economically expensive for an attacker to consume a disproportionate amount of network resources. When allocating resources like bandwidth, a naive approach can lead to starvation, where malicious actors grab as many resources as possible to deny them to legitimate users.
+
+This system ensures fair resource distribution by requiring clients to provide Proof-of-Work (PoW). The more PoW a client provides, the more resources they can access. However, it's not a simple linear relationship. The system is designed to be fair and resistant to several attack vectors.
+
+### Threat Model Reference
+
+This system directly mitigates the following threats mentioned in the "The Threat Model" section:
+
+*   **Active Adversary Threats (Sybil Attacks):** By requiring a minimum PoW contribution, it becomes expensive for an adversary to create a large number of fake identities (Sybils) to overwhelm the network.
+*   **Disruptive Adversary Threats (DDoS Attacks):** The PoW requirement acts as a rate-limiting mechanism, making it costly for an attacker to flood the network with traffic.
+
+### High-Level Explanation
+
+The resource allocation system uses a multi-layered approach to ensure fairness and security:
+
+1.  **Minimum Contribution Threshold:** To qualify for a guaranteed minimum share of resources, a client must provide a certain minimum amount of PoW. This is the primary defense against Sybil attacks, as it prevents an attacker from creating many low-effort clients to gain an unfair advantage. Clients who don't meet this threshold can still get resources, but they are not guaranteed a minimum share.
+
+2.  **Tenure-Based Minimum Allocation:** To protect legitimate users with less powerful devices from being overshadowed by powerful but new clients, the system incorporates the concept of "tenure". Clients that have been connected to the network for a longer time receive a higher guaranteed minimum allocation. This ensures that long-standing, well-behaved clients are not starved of resources.
+
+3.  **Sublinear Compression:** To prevent a single, powerful attacker from monopolizing the network's resources (a "monopoly attack"), the system applies a sublinear compression function (specifically, a square root) to the PoW contribution. This means that while more PoW still results in more resources, the returns are diminishing. For example, 100 times the hashing power does not result in 100 times the resources, but rather something closer to 10 times.
+
+4.  **Reserve Capacity Capping:** A fixed percentage of the total network capacity (e.g., 15%) is reserved for the minimum allocations guaranteed by the tenure system. This ensures that even with many long-standing clients, there is always a significant portion of the network's capacity available for allocation based purely on PoW contribution.
+
+In summary, the system calculates a client's resource allocation in two phases:
+
+*   **Reserve Phase:** For clients who meet the minimum contribution threshold, a guaranteed minimum allocation is calculated based on their tenure.
+*   **Earned Phase:** The remaining network capacity is distributed proportionally among all clients based on their (compressed) PoW contribution.
+
+A client's final allocation is the sum of their minimum and earned allocations. This two-tiered approach ensures that the network is both fair to legitimate users and resilient against common attacks.

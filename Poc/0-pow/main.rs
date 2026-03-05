@@ -94,6 +94,7 @@ fn main() -> io::Result<()> {
 
     // let my_ip = get_public_ip()?;
     // let my_addr = format!("{}:{}", my_ip, &args[1]);
+    
     // nodes.lock().unwrap().push(my_addr);
 
     match args.len() {

@@ -28,6 +28,7 @@
           type = "app";
           program = "${defaultPackage}/bin/client";
         };
+        apps.default = apps.server;
       }
     );
 }

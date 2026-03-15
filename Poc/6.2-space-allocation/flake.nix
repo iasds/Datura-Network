@@ -20,6 +20,14 @@
           buildInputs = [ cargo rustc rustfmt pre-commit rustPackages.clippy rust-analyzer socat pv ];
           RUST_SRC_PATH = rustPlatform.rustLibSrc;
         };
+        apps.server = {
+          type = "app";
+          program = "${defaultPackage}/bin/server";
+        };
+        apps.client = {
+          type = "app";
+          program = "${defaultPackage}/bin/client";
+        };
       }
     );
 }

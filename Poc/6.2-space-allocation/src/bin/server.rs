@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::error::Error;
 use std::net::IpAddr;
+use std::str::FromStr;
 use std::sync::Arc;
 use std::thread;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -12,6 +13,7 @@ use space_allocation::bandwidth::{
 	AUTH_BANDWIDTH, NODE_BANDWIDTH, NodeRate, NodeRateLimiter, TOTAL_BANDWIDTH_LIMITER, difficulty,
 };
 use space_allocation::pow;
+use space_allocation::protocol::Protocol;
 
 const DATA_ADDR: &str = "127.0.0.1:9977";
 const CONTROL_ADDR: &str = "127.0.0.1:9978";
@@ -86,48 +88,56 @@ async fn control_thread(
 	let listener = TcpListener::bind(CONTROL_ADDR).await?;
 
 	loop {
-		let (mut socket, addr) = listener.accept().await.unwrap();
+		let (mut socket, addr) = listener.accept().await?;
 		let tx = tx.clone();
-		let limiters = limiters.clone();
-		tokio::spawn(async move {
-			let mut solution = [0; 8];
-			let limiter = limiters
-				.lock()
-				.await
-				.entry(addr.ip())
-				.or_insert_with(|| Arc::new(Mutex::new(NodeRateLimiter::anon())))
-				.clone();
+		let mut instruction: [u8; 32] = [0; 32];
+		let len = socket.read(&mut instruction).await?;
+		match Protocol::from_str(str::from_utf8(&instruction[..len])?.trim()) {
+			Ok(Protocol::Knock) => {
+				let limiters = limiters.clone();
+				tokio::spawn(async move {
+					let mut solution = [0; 8];
+					let limiter = limiters
+						.lock()
+						.await
+						.entry(addr.ip())
+						.or_insert_with(|| Arc::new(Mutex::new(NodeRateLimiter::anon())))
+						.clone();
 
-			let mut limiter = limiter.lock().await;
+					let mut limiter = limiter.lock().await;
 
-			match &mut limiter.rate {
-				NodeRate::Anon(challenge) => {
-					let challenge = challenge.get(difficulty().await);
-					socket.write_all(&challenge).await.unwrap();
+					match &mut limiter.rate {
+						NodeRate::Anon(challenge) => {
+							let challenge = challenge.get(difficulty().await);
+							socket.write_all(&challenge).await.unwrap();
 
-					if socket.read(&mut solution).await.unwrap() == 8 {
-						let (vm_tx, vm_rx) = oneshot::channel::<bool>();
-						tx.send((addr.ip(), challenge, solution, vm_tx))
-							.await
-							.unwrap();
-						if vm_rx.await.unwrap() {
-							*limiter = NodeRateLimiter::auth();
-						}
-					} else {
-						// This is very bad for performance, obviously.
-						eprintln!(
-							"Requested {} of bandwith from {} available.",
-							AUTH_BANDWIDTH,
-							{
-								let node = TOTAL_BANDWIDTH_LIMITER.lock().await;
-								NODE_BANDWIDTH as isize - (node.max() - node.balance()) as isize
+							if socket.read(&mut solution).await.unwrap() == 8 {
+								let (vm_tx, vm_rx) = oneshot::channel::<bool>();
+								tx.send((addr.ip(), challenge, solution, vm_tx))
+									.await
+									.unwrap();
+								if vm_rx.await.unwrap() {
+									*limiter = NodeRateLimiter::auth();
+								}
+							} else {
+								// This is very bad for performance, obviously.
+								eprintln!(
+									"Requested {} of bandwith from {} available.",
+									AUTH_BANDWIDTH,
+									{
+										let node = TOTAL_BANDWIDTH_LIMITER.lock().await;
+										NODE_BANDWIDTH as isize
+											- (node.max() - node.balance()) as isize
+									}
+								);
 							}
-						);
+						}
+						NodeRate::Auth(..) => (),
 					}
-				}
-				NodeRate::Auth(..) => (),
+				});
 			}
-		});
+			_ => {}
+		}
 	}
 }
 

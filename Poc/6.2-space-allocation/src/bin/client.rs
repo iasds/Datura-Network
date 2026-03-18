@@ -16,6 +16,8 @@ async fn main() {
 	let mut challenge = [0; 16];
 
 	let mut stream = TcpStream::connect(CONTROL_ADDR).await.unwrap();
+
+	stream.write(b"KNOCK").await.unwrap();
 	match stream.read(&mut challenge).await {
 		Ok(16) => {
 			println!("Challenge received.");

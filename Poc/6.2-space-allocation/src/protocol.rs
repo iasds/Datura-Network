@@ -10,8 +10,9 @@ pub enum Protocol {
 impl FromStr for Protocol {
 	type Err = ();
 	fn from_str(input: &str) -> Result<Protocol, Self::Err> {
-		match input {
-			"KNOCK" => Ok(Protocol::Knock),
+		match input.split_once(' ').unwrap_or((input, "")) {
+			("KNOCK", "") => Ok(Protocol::Knock),
+			("PUT", n) => Ok(Protocol::Put(usize::from_str(n).map_err(|_| ())?)),
 			_ => Err(()),
 		}
 	}

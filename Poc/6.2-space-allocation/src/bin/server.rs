@@ -24,7 +24,6 @@ type NodeID = IpAddr; // node are identified by their ip address
 
 type NodeHashMap = Arc<Mutex<HashMap<NodeID, Arc<Mutex<NodeRateLimiter>>>>>;
 
-// inspired from https://github.com/tokio-rs/tokio/blob/master/examples/echo-tcp.rs
 async fn data_thread(limiters: NodeHashMap) -> Result<(), Box<dyn Error>> {
 	let listener = TcpListener::bind(DATA_ADDR).await?;
 

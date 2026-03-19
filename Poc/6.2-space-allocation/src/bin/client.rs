@@ -39,6 +39,9 @@ async fn main() {
 	}
 
 	let mut stream = TcpStream::connect(CONTROL_ADDR).await.unwrap();
+	stream.write(b"KNOCK").await.unwrap();
+	stream.read(&mut challenge).await.unwrap();
+
 	match stream.write_all(&solution.to_ne_bytes()).await {
 		Ok(_) => {
 			println!("Challenge has been solved, and throttling lifted.");

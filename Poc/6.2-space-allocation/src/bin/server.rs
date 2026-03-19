@@ -139,7 +139,22 @@ async fn control_thread(
 					}
 				});
 			}
-			Ok(Protocol::Put(n)) => todo!(),
+			Ok(Protocol::Put(n)) => {
+				let limiter = limiters
+					.lock()
+					.await
+					.entry(addr.ip())
+					.or_insert_with(|| Arc::new(Mutex::new(NodeRateLimiter::anon())))
+					.clone();
+
+				let mut limiter = limiter.lock().await;
+				match &mut limiter.rate {
+					NodeRate::Anon(..) => {}
+					NodeRate::Auth(..) => {
+						todo!()
+					}
+				}
+			}
 			Ok(Protocol::Get(_)) => todo!(),
 			Err(_) => {}
 		}

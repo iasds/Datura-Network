@@ -14,6 +14,7 @@ use space_allocation::bandwidth::{
 };
 use space_allocation::pow;
 use space_allocation::protocol::Protocol;
+use space_allocation::store;
 
 const DATA_ADDR: &str = "127.0.0.1:9977";
 const CONTROL_ADDR: &str = "127.0.0.1:9978";
@@ -151,7 +152,7 @@ async fn control_thread(
 				match &mut limiter.rate {
 					NodeRate::Anon(..) => {}
 					NodeRate::Auth(..) => {
-						todo!()
+						todo!();
 					}
 				}
 			}

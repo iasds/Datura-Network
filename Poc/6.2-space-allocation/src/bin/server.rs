@@ -92,7 +92,10 @@ async fn control_thread(
 		let tx = tx.clone();
 		let mut instruction: [u8; 32] = [0; 32];
 		let len = socket.read(&mut instruction).await?;
-		match Protocol::from_str(str::from_utf8(&instruction[..len])?.trim()) {
+		match str::from_utf8(&instruction[..len])
+			.map_err(|_| ())
+			.and_then(Protocol::from_str)
+		{
 			Ok(Protocol::Knock) => {
 				let limiters = limiters.clone();
 				tokio::spawn(async move {

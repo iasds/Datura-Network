@@ -139,7 +139,9 @@ async fn control_thread(
 					}
 				});
 			}
-			_ => {}
+			Ok(Protocol::Put(n)) => todo!(),
+			Ok(Protocol::Get(_)) => todo!(),
+			Err(_) => {}
 		}
 	}
 }

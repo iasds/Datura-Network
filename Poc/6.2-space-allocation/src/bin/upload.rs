@@ -47,5 +47,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
 	println!("Challenge has been solved, sending data...");
 
+	tokio::io::copy(&mut file, &mut stream).await?;
+
 	Ok(())
 }

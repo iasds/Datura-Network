@@ -87,7 +87,7 @@ async fn control_thread(
 	limiters: NodeHashMap,
 ) -> Result<(), Box<dyn Error>> {
 	let listener = TcpListener::bind(CONTROL_ADDR).await?;
-	let data_store: DataStoreHashMap = Arc::new(Mutex::new(HashMap::new()));
+	let store_challenges: DataStoreHashMap = Arc::new(Mutex::new(HashMap::new()));
 
 	loop {
 		let (mut socket, addr) = listener.accept().await?;
@@ -140,9 +140,9 @@ async fn control_thread(
 				});
 			}
 			Ok(Protocol::Put(n)) => {
-				let data_store = data_store.clone();
+				let store_challenges = store_challenges.clone();
 				tokio::spawn(async move {
-					let challenge = data_store
+					let challenge = store_challenges
 						.lock()
 						.await
 						.entry((addr.ip(), n))

@@ -174,7 +174,11 @@ async fn control_thread(
 					}
 				});
 			}
-			Ok(Protocol::Get(_)) => todo!(),
+			Ok(Protocol::Get(data)) => {
+				if let Ok(mut fd) = store::retrieve(data).await {
+					copy(&mut fd, &mut socket).await.unwrap();
+				}
+			}
 			Err(_) => {}
 		}
 	}

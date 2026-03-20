@@ -1,4 +1,5 @@
 //! The client uploads a file given to the command-line.
+use space_allocation::pow;
 use std::env;
 use std::error::Error;
 use tokio::fs::File;
@@ -17,6 +18,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
 	let mut stream = TcpStream::connect(CONTROL_ADDR).await.unwrap();
 
 	let mut challenge = [0; 16];
+	let vm = pow::create_vm().unwrap();
+	let mut solution = rand::random::<u64>();
 
 	stream
 		.write_all(format!("PUT {}", file_size).as_bytes())
@@ -29,5 +32,11 @@ async fn main() -> Result<(), Box<dyn Error>> {
 	// port. it only affects your node, e.g you can't block other nodes. should this be
 	// fixed?
 	stream.shutdown().await?;
+	println!("Difficulty is {}.", challenge[0] & 0b111111);
+
+	while !pow::validate_solution(&vm, challenge, solution.to_ne_bytes()) {
+		solution += 1;
+	}
+
 	Ok(())
 }

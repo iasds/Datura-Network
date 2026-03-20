@@ -166,12 +166,9 @@ async fn control_thread(
 							.or_insert_with(|| Arc::new(Mutex::new(NodeRateLimiter::anon())))
 							.clone();
 
-						match store::read_from(&mut socket, n, limiter).await {
-							Ok(id) => {
-								socket.write(&id).await.unwrap();
-								STORE_CHALLENGES.lock().await.remove(&(addr.ip(), n));
-							}
-							Err(_) => todo!(),
+						if let Ok(id) = store::read_from(&mut socket, n, limiter).await {
+							socket.write(&id).await.unwrap();
+							STORE_CHALLENGES.lock().await.remove(&(addr.ip(), n));
 						};
 					}
 				});

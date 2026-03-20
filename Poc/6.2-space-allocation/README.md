@@ -42,6 +42,7 @@ Control <- Store : Yes.
 
 Client -> Control : Data (size **n**)
 Control -> Store : Data (size **n**)
+
 Control <- Store : Randomly-generated 256-bit data ID
 Client <- Control : data ID
 

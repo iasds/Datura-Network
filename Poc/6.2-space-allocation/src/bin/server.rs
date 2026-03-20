@@ -151,7 +151,10 @@ async fn control_thread(
 				match &mut limiter.rate {
 					NodeRate::Anon(..) => {}
 					NodeRate::Auth(..) => {
-						todo!();
+						match store::read_from(&mut socket, n).await {
+							Ok(id) => socket.write(&id).await?,
+							Err(_) => todo!(),
+						};
 					}
 				}
 			}

@@ -34,7 +34,7 @@ impl Challenge {
 
 	pub fn get(&mut self, difficulty: u8) -> [u8; 16] {
 		if self.inner.is_none() || Instant::now() >= self.valid_until {
-			self.inner = Some(Self::create(difficulty));
+			self.inner = Some(Self::create(DIFFICULTY + difficulty));
 			self.valid_until = Instant::now() + Duration::from_hours(CHALLENGE_VALIDITY);
 		}
 		self.inner.unwrap()

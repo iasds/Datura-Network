@@ -6,7 +6,7 @@ use tokio::{
 
 use leaky_bucket::RateLimiter;
 
-use crate::pow::{Challenge, DIFFICULTY};
+use crate::pow::Challenge;
 
 pub const ANON_BANDWIDTH: usize = 10 * 1024; // 10kb
 pub const AUTH_BANDWIDTH: usize = 1024 * 1024; // 1mb
@@ -74,7 +74,5 @@ pub async fn difficulty() -> u8 {
 		node.max() - node.balance()
 	};
 
-	let difficulty_increase = (used_bandwidth as f64 / NODE_BANDWIDTH as f64 - 0.9).max(0.0) * 10.0;
-
-	(difficulty_increase + DIFFICULTY as f64).round() as u8
+	((used_bandwidth as f64 / NODE_BANDWIDTH as f64 - 0.9).max(0.0) * 10.0).round() as u8
 }

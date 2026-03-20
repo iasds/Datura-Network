@@ -11,7 +11,7 @@ const CONTROL_ADDR: &str = "127.0.0.1:9978";
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
-	let fname: String = env::args().next().unwrap();
+	let fname: String = env::args().skip(1).next().unwrap();
 	let mut file = File::open(fname).await?;
 	let file_size = file.metadata().await?.len();
 

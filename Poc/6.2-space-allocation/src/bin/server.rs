@@ -83,7 +83,7 @@ async fn data_thread(limiters: NodeHashMap) -> Result<(), Box<dyn Error>> {
 }
 
 async fn control_thread(
-	tx: mpsc::Sender<(NodeID, [u8; 16], [u8; 8], oneshot::Sender<bool>)>,
+	tx: mpsc::Sender<([u8; 16], [u8; 8], oneshot::Sender<bool>)>,
 	limiters: NodeHashMap,
 ) -> Result<(), Box<dyn Error>> {
 	let listener = TcpListener::bind(CONTROL_ADDR).await?;
@@ -118,9 +118,7 @@ async fn control_thread(
 
 							if socket.read(&mut solution).await.unwrap() == 8 {
 								let (vm_tx, vm_rx) = oneshot::channel::<bool>();
-								tx.send((addr.ip(), challenge, solution, vm_tx))
-									.await
-									.unwrap();
+								tx.send((challenge, solution, vm_tx)).await.unwrap();
 								if vm_rx.await.unwrap() {
 									*limiter = NodeRateLimiter::auth();
 								}
@@ -169,12 +167,12 @@ async fn control_thread(
 #[tokio::main]
 async fn main() {
 	let limiters: NodeHashMap = Arc::new(Mutex::new(HashMap::new()));
-	let (tx, mut rx) = mpsc::channel::<(IpAddr, [u8; 16], [u8; 8], oneshot::Sender<bool>)>(4096);
+	let (tx, mut rx) = mpsc::channel::<([u8; 16], [u8; 8], oneshot::Sender<bool>)>(4096);
 
 	let vm_thread = thread::spawn(move || {
 		let vm = pow::create_vm().unwrap();
 
-		while let Some((_node_id, challenge, solution, msg)) = rx.blocking_recv() {
+		while let Some((challenge, solution, msg)) = rx.blocking_recv() {
 			msg.send(pow::validate_solution(&vm, challenge, solution))
 				.unwrap();
 		}

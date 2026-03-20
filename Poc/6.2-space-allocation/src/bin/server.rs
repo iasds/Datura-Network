@@ -3,6 +3,7 @@ use std::error::Error;
 use std::net::IpAddr;
 use std::str::FromStr;
 use std::sync::Arc;
+use std::sync::LazyLock;
 use std::thread;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
@@ -22,16 +23,16 @@ const BUFFER_SIZE: usize = 8192;
 
 type NodeID = IpAddr; // node are identified by their ip address
 
-type NodeHashMap = Arc<Mutex<HashMap<NodeID, Arc<Mutex<NodeRateLimiter>>>>>;
+static RATE_LIMITERS: LazyLock<Mutex<HashMap<NodeID, Arc<Mutex<NodeRateLimiter>>>>> =
+	LazyLock::new(|| Mutex::new(HashMap::new()));
 type DataStoreHashMap = Arc<Mutex<HashMap<(NodeID, usize), pow::Challenge>>>;
 
-async fn data_thread(limiters: NodeHashMap) -> Result<(), Box<dyn Error>> {
+async fn data_thread() -> Result<(), Box<dyn Error>> {
 	let listener = TcpListener::bind(DATA_ADDR).await?;
 
 	loop {
 		let (mut socket, addr) = listener.accept().await.unwrap();
 		let mut stdout = tokio::io::stdout();
-		let limiters = limiters.clone();
 
 		tokio::spawn(async move {
 			let mut buf = vec![0; BUFFER_SIZE];
@@ -48,7 +49,7 @@ async fn data_thread(limiters: NodeHashMap) -> Result<(), Box<dyn Error>> {
 							return;
 						}
 
-						let limiter = limiters
+						let limiter = RATE_LIMITERS
 							.lock()
 							.await
 							.entry(addr.ip())
@@ -84,7 +85,6 @@ async fn data_thread(limiters: NodeHashMap) -> Result<(), Box<dyn Error>> {
 
 async fn control_thread(
 	tx: mpsc::Sender<([u8; 16], [u8; 8], oneshot::Sender<bool>)>,
-	limiters: NodeHashMap,
 ) -> Result<(), Box<dyn Error>> {
 	let listener = TcpListener::bind(CONTROL_ADDR).await?;
 	let store_challenges: DataStoreHashMap = Arc::new(Mutex::new(HashMap::new()));
@@ -99,10 +99,9 @@ async fn control_thread(
 			.and_then(Protocol::from_str)
 		{
 			Ok(Protocol::Knock) => {
-				let limiters = limiters.clone();
 				tokio::spawn(async move {
 					let mut solution = [0; 8];
-					let limiter = limiters
+					let limiter = RATE_LIMITERS
 						.lock()
 						.await
 						.entry(addr.ip())
@@ -141,7 +140,6 @@ async fn control_thread(
 			}
 			Ok(Protocol::Put(n)) => {
 				let store_challenges = store_challenges.clone();
-				let limiters = limiters.clone();
 				tokio::spawn(async move {
 					let challenge = store_challenges
 						.lock()
@@ -161,12 +159,13 @@ async fn control_thread(
 					let (vm_tx, vm_rx) = oneshot::channel::<bool>();
 					tx.send((challenge, solution, vm_tx)).await.unwrap();
 					if vm_rx.await.unwrap() && store::check_free_space(n) {
-						let limiter = limiters
+						let limiter = RATE_LIMITERS
 							.lock()
 							.await
 							.entry(addr.ip())
 							.or_insert_with(|| Arc::new(Mutex::new(NodeRateLimiter::anon())))
 							.clone();
+
 						match store::read_from(&mut socket, n, limiter).await {
 							Ok(id) => {
 								socket.write(&id).await.unwrap();
@@ -185,7 +184,6 @@ async fn control_thread(
 
 #[tokio::main]
 async fn main() {
-	let limiters: NodeHashMap = Arc::new(Mutex::new(HashMap::new()));
 	let (tx, mut rx) = mpsc::channel::<([u8; 16], [u8; 8], oneshot::Sender<bool>)>(4096);
 
 	let vm_thread = thread::spawn(move || {
@@ -200,8 +198,8 @@ async fn main() {
 	store::init().await.unwrap();
 
 	tokio::select! {
-		_ = data_thread(limiters.clone()) => {},
-		_ = control_thread(tx, limiters.clone()) => {},
+		_ = data_thread() => {},
+		_ = control_thread(tx) => {},
 	};
 
 	vm_thread.join().unwrap();

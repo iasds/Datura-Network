@@ -13,6 +13,11 @@ impl FromStr for Protocol {
 		match input.split_once(' ').unwrap_or((input, "")) {
 			("KNOCK", "") => Ok(Protocol::Knock),
 			("PUT", n) => Ok(Protocol::Put(usize::from_str(n).map_err(|_| ())?)),
+			("GET", dataid) => dataid[..32]
+				.as_bytes()
+				.try_into()
+				.map(Protocol::Get)
+				.map_err(|_| ()),
 			_ => Err(()),
 		}
 	}

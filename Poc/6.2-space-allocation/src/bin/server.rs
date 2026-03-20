@@ -141,7 +141,7 @@ async fn control_thread(
 			}
 			Ok(Protocol::Put(n)) => {
 				match store::read_from(&mut socket, n).await {
-					Ok(id) => socket.write(&id).await?,
+					Ok(id) => socket.write_all(&id).await?,
 					Err(_) => todo!(),
 				};
 			}

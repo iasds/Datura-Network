@@ -38,5 +38,14 @@ async fn main() -> Result<(), Box<dyn Error>> {
 		solution += 1;
 	}
 
+	let mut stream = TcpStream::connect(CONTROL_ADDR).await.unwrap();
+	stream
+		.write_all(format!("PUT {}", file_size).as_bytes())
+		.await?;
+	stream.read_exact(&mut challenge).await?;
+	stream.write_all(&solution.to_ne_bytes()).await?;
+
+	println!("Challenge has been solved, sending data...");
+
 	Ok(())
 }

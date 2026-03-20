@@ -5,6 +5,7 @@ use std::str::FromStr;
 use std::sync::Arc;
 use std::sync::LazyLock;
 use std::thread;
+use tokio::io::copy;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 use tokio::sync::{Mutex, mpsc, oneshot};
@@ -93,7 +94,7 @@ async fn control_thread(
 	loop {
 		let (mut socket, addr) = listener.accept().await?;
 		let tx = tx.clone();
-		let mut instruction: [u8; 32] = [0; 32];
+		let mut instruction: [u8; 36] = [0; 36];
 		let len = socket.read(&mut instruction).await?;
 		match str::from_utf8(&instruction[..len])
 			.map_err(|_| ())

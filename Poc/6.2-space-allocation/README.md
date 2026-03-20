@@ -13,7 +13,12 @@ hide footbox
 
 Client -> Control : Access request (**KNOCK**)
 
-Client <- Control ++ #red : Challenge (tailored for bandwidth)
+Client <- Control ++ #red : Access challenge (tailored for bandwidth)
+
+...
+
+Client -> Control : **KNOCK**
+Client <- Control : Saved access challenge
 Client -> Control -- : Solution
 
 Control -> Control : Open bandwidth for client

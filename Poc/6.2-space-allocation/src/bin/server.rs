@@ -25,7 +25,9 @@ type NodeID = IpAddr; // node are identified by their ip address
 
 static RATE_LIMITERS: LazyLock<Mutex<HashMap<NodeID, Arc<Mutex<NodeRateLimiter>>>>> =
 	LazyLock::new(|| Mutex::new(HashMap::new()));
-type DataStoreHashMap = Arc<Mutex<HashMap<(NodeID, usize), pow::Challenge>>>;
+
+static STORE_CHALLENGES: LazyLock<Mutex<HashMap<(NodeID, usize), pow::Challenge>>> =
+	LazyLock::new(|| Mutex::new(HashMap::new()));
 
 async fn data_thread() -> Result<(), Box<dyn Error>> {
 	let listener = TcpListener::bind(DATA_ADDR).await?;
@@ -87,7 +89,6 @@ async fn control_thread(
 	tx: mpsc::Sender<([u8; 16], [u8; 8], oneshot::Sender<bool>)>,
 ) -> Result<(), Box<dyn Error>> {
 	let listener = TcpListener::bind(CONTROL_ADDR).await?;
-	let store_challenges: DataStoreHashMap = Arc::new(Mutex::new(HashMap::new()));
 
 	loop {
 		let (mut socket, addr) = listener.accept().await?;
@@ -139,9 +140,8 @@ async fn control_thread(
 				});
 			}
 			Ok(Protocol::Put(n)) => {
-				let store_challenges = store_challenges.clone();
 				tokio::spawn(async move {
-					let challenge = store_challenges
+					let challenge = STORE_CHALLENGES
 						.lock()
 						.await
 						.entry((addr.ip(), n))
@@ -169,7 +169,7 @@ async fn control_thread(
 						match store::read_from(&mut socket, n, limiter).await {
 							Ok(id) => {
 								socket.write(&id).await.unwrap();
-								store_challenges.lock().await.remove(&(addr.ip(), n));
+								STORE_CHALLENGES.lock().await.remove(&(addr.ip(), n));
 							}
 							Err(_) => todo!(),
 						};

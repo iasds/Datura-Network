@@ -21,6 +21,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
 	let vm = pow::create_vm().unwrap();
 	let mut solution = rand::random::<u64>();
 
+	let mut data_id = [0u8; 32];
+
 	stream
 		.write_all(format!("PUT {}", file_size).as_bytes())
 		.await?;
@@ -48,6 +50,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
 	println!("Challenge has been solved, sending data...");
 
 	tokio::io::copy(&mut file, &mut stream).await?;
+
+	stream.read_exact(&mut data_id).await?;
+
+	println!("Data is stored under the ID {}", const_hex::encode(data_id));
 
 	Ok(())
 }

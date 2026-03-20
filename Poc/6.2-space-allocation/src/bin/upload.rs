@@ -22,10 +22,12 @@ async fn main() -> Result<(), Box<dyn Error>> {
 	let mut solution = rand::random::<u64>();
 
 	let mut data_id = [0u8; 32];
+	let mut stanza = [0u8; 12];
 
-	stream
-		.write_all(format!("PUT {}", file_size).as_bytes())
-		.await?;
+	stanza[..4].copy_from_slice(b"PUT ");
+	stanza[4..].copy_from_slice(&file_size.to_ne_bytes());
+
+	stream.write_all(&stanza).await?;
 
 	stream.read_exact(&mut challenge).await?;
 
@@ -41,9 +43,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
 	}
 
 	let mut stream = TcpStream::connect(CONTROL_ADDR).await.unwrap();
-	stream
-		.write_all(format!("PUT {}", file_size).as_bytes())
-		.await?;
+	stream.write_all(&stanza).await?;
+
 	stream.read_exact(&mut challenge).await?;
 	stream.write_all(&solution.to_ne_bytes()).await?;
 

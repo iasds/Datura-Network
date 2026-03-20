@@ -12,7 +12,7 @@ impl FromStr for Protocol {
 	fn from_str(input: &str) -> Result<Protocol, Self::Err> {
 		match input.split_once(' ').unwrap_or((input, "")) {
 			("KNOCK", "") => Ok(Protocol::Knock),
-			("PUT", n) => Ok(Protocol::Put(usize::from_str(n).map_err(|_| ())?)),
+			("PUT", n) => usize::from_str(n).map(Protocol::Put).map_err(|_| ()),
 			("GET", dataid) => dataid[..32]
 				.as_bytes()
 				.try_into()

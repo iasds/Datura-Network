@@ -15,9 +15,3 @@ const-hex = "1.18.1"
 strip = "symbols"
 panic = "abort"
 lto = true
-
-[[bin]]
-name = "client"
-
-[[bin]]
-name = "server"

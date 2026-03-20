@@ -1,3 +1,4 @@
+use crate::pow::DIFFICULTY;
 use fs2::available_space;
 use rand::Rng;
 use tokio::fs;
@@ -17,6 +18,10 @@ pub fn check_free_space(n: usize) -> bool {
 		Ok(f) => f >= (n as u64),
 		Err(_) => false,
 	}
+}
+
+pub fn difficulty(n: usize) -> u8 {
+	DIFFICULTY + n.ilog10() as u8 - 3
 }
 
 // inspired from https://github.com/tokio-rs/tokio/blob/master/examples/echo-tcp.rs

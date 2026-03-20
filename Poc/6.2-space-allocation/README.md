@@ -20,6 +20,9 @@ Control -> Control : Open bandwidth for client
 
 Client -> Control : Storage request (**PUT n**)
 
+Control -> Store : Is there at least **n** free space?
+Control <- Store : Yes.
+
 Client <- Control ++ #red : Challenge (tailored for data size **n**)
 Client -> Control -- : Solution
 

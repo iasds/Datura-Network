@@ -140,23 +140,10 @@ async fn control_thread(
 				});
 			}
 			Ok(Protocol::Put(n)) => {
-				let limiter = limiters
-					.lock()
-					.await
-					.entry(addr.ip())
-					.or_insert_with(|| Arc::new(Mutex::new(NodeRateLimiter::anon())))
-					.clone();
-
-				let mut limiter = limiter.lock().await;
-				match &mut limiter.rate {
-					NodeRate::Anon(..) => {}
-					NodeRate::Auth(..) => {
-						match store::read_from(&mut socket, n).await {
-							Ok(id) => socket.write(&id).await?,
-							Err(_) => todo!(),
-						};
-					}
-				}
+				match store::read_from(&mut socket, n).await {
+					Ok(id) => socket.write(&id).await?,
+					Err(_) => todo!(),
+				};
 			}
 			Ok(Protocol::Get(_)) => todo!(),
 			Err(_) => {}

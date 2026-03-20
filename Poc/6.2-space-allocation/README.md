@@ -11,6 +11,8 @@ end box
 
 hide footbox
 
+== Bandwidth ==
+
 Client -> Control : Access request (**KNOCK**)
 
 Client <- Control ++ #red : Access challenge (tailored for bandwidth)
@@ -22,6 +24,8 @@ Client <- Control : Saved access challenge
 Client -> Control -- : Solution
 
 Control -> Control : Open bandwidth for client
+
+== Storage ==
 
 Client -> Control : Storage request (**PUT n**)
 

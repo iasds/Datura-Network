@@ -1,5 +1,6 @@
 use rand::Rng;
 use tokio::io;
+use tokio::io::AsyncReadExt;
 use tokio::net::TcpStream;
 
 const DATA_PATH: &str = "/tmp/datura/store";
@@ -11,5 +12,16 @@ pub async fn read_from(socket: &mut TcpStream, data_len: usize) -> io::Result<[u
 	rand::rng().fill(&mut id);
 
 	let mut buf = vec![0; BUFFER_SIZE];
-	todo!();
+
+	while data_len > 0 {
+		match socket.read(&mut buf).await {
+			// Connection closed by peer
+			Ok(0) => return Ok(id),
+			Ok(n) => {
+				todo!();
+			}
+			Err(e) => return Err(e),
+		}
+	}
+	Ok(id)
 }

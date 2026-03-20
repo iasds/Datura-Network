@@ -12,29 +12,29 @@ pub async fn init() -> io::Result<()> {
 	fs::create_dir_all(DATA_PATH).await
 }
 
-pub fn check_free_space(data_len: usize) -> bool {
+pub fn check_free_space(n: usize) -> bool {
 	match available_space(DATA_PATH) {
-		Ok(n) => n >= (data_len as u64),
+		Ok(f) => f >= (n as u64),
 		Err(_) => false,
 	}
 }
 
 // inspired from https://github.com/tokio-rs/tokio/blob/master/examples/echo-tcp.rs
-pub async fn read_from(socket: &mut TcpStream, mut data_len: usize) -> io::Result<[u8; 32]> {
+pub async fn read_from(socket: &mut TcpStream, mut n: usize) -> io::Result<[u8; 32]> {
 	let mut id = [0u8; 32];
 	rand::rng().fill(&mut id);
 
 	let mut buf = vec![0; BUFFER_SIZE];
 	let mut file = fs::File::create(format!("{}/{}", DATA_PATH, const_hex::encode(id))).await?;
 
-	while data_len > 0 {
+	while n > 0 {
 		match socket.read(&mut buf).await {
 			// Connection closed by peer
 			Ok(0) => return Ok(id),
-			Ok(n) => {
-				let len = n.min(data_len);
+			Ok(b) => {
+				let len = b.min(n);
 				file.write_all(&buf[0..len]).await?;
-				data_len -= len;
+				n -= len;
 			}
 			Err(e) => return Err(e),
 		}

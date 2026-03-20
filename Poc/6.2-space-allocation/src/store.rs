@@ -26,6 +26,10 @@ pub fn difficulty(n: usize) -> u8 {
 	n.ilog10().max(3) as u8 - 3
 }
 
+pub async fn retrieve(dataid: [u8; 32]) -> io::Result<fs::File> {
+	fs::File::open(format!("{}/{}", DATA_PATH, const_hex::encode(dataid))).await
+}
+
 // inspired from https://github.com/tokio-rs/tokio/blob/master/examples/echo-tcp.rs
 pub async fn read_from(
 	socket: &mut TcpStream,

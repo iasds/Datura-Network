@@ -140,10 +140,12 @@ async fn control_thread(
 				});
 			}
 			Ok(Protocol::Put(n)) => {
-				match store::read_from(&mut socket, n).await {
-					Ok(id) => socket.write_all(&id).await?,
-					Err(_) => todo!(),
-				};
+				tokio::spawn(async move {
+					match store::read_from(&mut socket, n).await {
+						Ok(id) => socket.write_all(&id).await.unwrap(),
+						Err(_) => todo!(),
+					};
+				});
 			}
 			Ok(Protocol::Get(_)) => todo!(),
 			Err(_) => {}

@@ -1,7 +1,7 @@
 use rand::Rng;
 use tokio::fs;
 use tokio::io;
-use tokio::io::AsyncReadExt;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 
 const DATA_PATH: &str = "/tmp/datura/store";
@@ -17,13 +17,16 @@ pub async fn read_from(socket: &mut TcpStream, mut data_len: usize) -> io::Resul
 	rand::rng().fill(&mut id);
 
 	let mut buf = vec![0; BUFFER_SIZE];
+	let mut file = fs::File::create(format!("{}/{}", DATA_PATH, const_hex::encode(id))).await?;
 
 	while data_len > 0 {
 		match socket.read(&mut buf).await {
 			// Connection closed by peer
 			Ok(0) => return Ok(id),
 			Ok(n) => {
-				todo!();
+				let len = n.min(data_len);
+				file.write_all(&buf[0..len]).await?;
+				data_len -= len;
 			}
 			Err(e) => return Err(e),
 		}

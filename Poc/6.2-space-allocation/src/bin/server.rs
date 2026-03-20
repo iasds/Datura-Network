@@ -150,12 +150,21 @@ async fn control_thread(
 						.get(store::difficulty(n));
 
 					socket.write_all(&challenge).await.unwrap();
-					todo!();
+					let mut solution = [0; 8];
 
-					match store::read_from(&mut socket, n).await {
-						Ok(id) => socket.write_all(&id).await.unwrap(),
-						Err(_) => todo!(),
+					if socket.read(&mut solution).await.unwrap() != 8 {
+						eprintln!("Requested to store {} bytes.", n);
+						return;
 					};
+
+					let (vm_tx, vm_rx) = oneshot::channel::<bool>();
+					tx.send((challenge, solution, vm_tx)).await.unwrap();
+					if vm_rx.await.unwrap() && store::check_free_space(n) {
+						match store::read_from(&mut socket, n).await {
+							Ok(id) => socket.write(&id).await.unwrap(),
+							Err(_) => todo!(),
+						};
+					}
 				});
 			}
 			Ok(Protocol::Get(_)) => todo!(),

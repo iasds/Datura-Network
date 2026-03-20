@@ -1,6 +1,8 @@
 This PoC heavily builds upon 6.1-alloc-bandwidth and 6-throttling. The documentation
 concerning bandwidth and challenge management are in these two subprojects.
 
+![spec_diagram](./spec.png "Spec diagram")
+
 ```plantuml
 @startuml
 actor Client

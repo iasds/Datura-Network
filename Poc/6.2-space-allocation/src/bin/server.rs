@@ -1,7 +1,6 @@
 use std::collections::HashMap;
 use std::error::Error;
 use std::net::IpAddr;
-use std::str::FromStr;
 use std::sync::Arc;
 use std::sync::LazyLock;
 use std::thread;
@@ -95,11 +94,8 @@ async fn control_thread(
 		let (mut socket, addr) = listener.accept().await?;
 		let tx = tx.clone();
 		let mut instruction: [u8; 36] = [0; 36];
-		let len = socket.read(&mut instruction).await?;
-		match str::from_utf8(&instruction[..len])
-			.map_err(|_| ())
-			.and_then(Protocol::from_str)
-		{
+		let _ = socket.read(&mut instruction).await?;
+		match Protocol::try_from(instruction) {
 			Ok(Protocol::Knock) => {
 				tokio::spawn(async move {
 					let mut solution = [0; 8];

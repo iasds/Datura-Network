@@ -23,6 +23,7 @@ const BUFFER_SIZE: usize = 8192;
 type NodeID = IpAddr; // node are identified by their ip address
 
 type NodeHashMap = Arc<Mutex<HashMap<NodeID, Arc<Mutex<NodeRateLimiter>>>>>;
+type DataStoreHashMap = Arc<Mutex<HashMap<(NodeID, usize), pow::Challenge>>>;
 
 async fn data_thread(limiters: NodeHashMap) -> Result<(), Box<dyn Error>> {
 	let listener = TcpListener::bind(DATA_ADDR).await?;
@@ -86,6 +87,7 @@ async fn control_thread(
 	limiters: NodeHashMap,
 ) -> Result<(), Box<dyn Error>> {
 	let listener = TcpListener::bind(CONTROL_ADDR).await?;
+	let data_store: DataStoreHashMap = Arc::new(Mutex::new(HashMap::new()));
 
 	loop {
 		let (mut socket, addr) = listener.accept().await?;
@@ -140,7 +142,18 @@ async fn control_thread(
 				});
 			}
 			Ok(Protocol::Put(n)) => {
+				let data_store = data_store.clone();
 				tokio::spawn(async move {
+					let challenge = data_store
+						.lock()
+						.await
+						.entry((addr.ip(), n))
+						.or_default()
+						.get(store::difficulty(n));
+
+					socket.write_all(&challenge).await.unwrap();
+					todo!();
+
 					match store::read_from(&mut socket, n).await {
 						Ok(id) => socket.write_all(&id).await.unwrap(),
 						Err(_) => todo!(),

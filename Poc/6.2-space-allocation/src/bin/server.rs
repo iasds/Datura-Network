@@ -141,6 +141,7 @@ async fn control_thread(
 			}
 			Ok(Protocol::Put(n)) => {
 				let store_challenges = store_challenges.clone();
+				let limiters = limiters.clone();
 				tokio::spawn(async move {
 					let challenge = store_challenges
 						.lock()
@@ -160,7 +161,13 @@ async fn control_thread(
 					let (vm_tx, vm_rx) = oneshot::channel::<bool>();
 					tx.send((challenge, solution, vm_tx)).await.unwrap();
 					if vm_rx.await.unwrap() && store::check_free_space(n) {
-						match store::read_from(&mut socket, n).await {
+						let limiter = limiters
+							.lock()
+							.await
+							.entry(addr.ip())
+							.or_insert_with(|| Arc::new(Mutex::new(NodeRateLimiter::anon())))
+							.clone();
+						match store::read_from(&mut socket, n, limiter).await {
 							Ok(id) => {
 								socket.write(&id).await.unwrap();
 								store_challenges.lock().await.remove(&(addr.ip(), n));

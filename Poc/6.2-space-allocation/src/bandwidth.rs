@@ -6,15 +6,13 @@ use tokio::{
 
 use leaky_bucket::RateLimiter;
 
-use crate::pow::Challenge;
+use crate::pow::{Challenge, DIFFICULTY};
 
 pub const ANON_BANDWIDTH: usize = 10 * 1024; // 10kb
 pub const AUTH_BANDWIDTH: usize = 1024 * 1024; // 1mb
 pub const NODE_BANDWIDTH: usize = 100 * 1024 * 1024; // 100mb
 const DATA_CAP: usize = 100 * 1024 * 1024; // 100mb
 const TIME_CAP: u64 = 1; // 1h
-
-const NORMAL_DIFFICULTY: u8 = 12; // standard difficulty of the challenge
 
 pub static TOTAL_BANDWIDTH_LIMITER: LazyLock<Mutex<RateLimiter>> = LazyLock::new(|| {
 	Mutex::new(
@@ -78,5 +76,5 @@ pub async fn difficulty() -> u8 {
 
 	let difficulty_increase = (used_bandwidth as f64 / NODE_BANDWIDTH as f64 - 0.9).max(0.0) * 10.0;
 
-	(difficulty_increase + NORMAL_DIFFICULTY as f64).round() as u8
+	(difficulty_increase + DIFFICULTY as f64).round() as u8
 }

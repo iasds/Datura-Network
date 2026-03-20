@@ -8,6 +8,7 @@ use tokio::time::Instant;
 const CHALLENGE_VALIDITY: u64 = 24; // 24h
 pub const SEED_HASH: &[u8; 64] =
 	b"1a803c1f384ff8b3cb35597b8d3364d32978e4aaa7f96ca894917b6d1d473fda";
+pub const DIFFICULTY: u8 = 12; // standard difficulty of the challenge
 
 #[derive(Debug, Clone)]
 pub struct Challenge {

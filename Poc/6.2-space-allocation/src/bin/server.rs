@@ -175,6 +175,8 @@ async fn main() {
 		}
 	});
 
+	store::init().await.unwrap();
+
 	tokio::select! {
 		_ = data_thread(limiters.clone()) => {},
 		_ = control_thread(tx, limiters.clone()) => {},

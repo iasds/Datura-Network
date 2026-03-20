@@ -1,3 +1,4 @@
+use fs2::available_space;
 use rand::Rng;
 use tokio::fs;
 use tokio::io;
@@ -9,6 +10,13 @@ const BUFFER_SIZE: usize = 8192;
 
 pub async fn init() -> io::Result<()> {
 	fs::create_dir_all(DATA_PATH).await
+}
+
+pub fn check_free_space(data_len: usize) -> bool {
+	match available_space(DATA_PATH) {
+		Ok(n) => n >= (data_len as u64),
+		Err(_) => false,
+	}
 }
 
 // inspired from https://github.com/tokio-rs/tokio/blob/master/examples/echo-tcp.rs

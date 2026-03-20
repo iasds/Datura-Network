@@ -20,7 +20,7 @@ pub fn check_free_space(n: usize) -> bool {
 }
 
 pub fn difficulty(n: usize) -> u8 {
-	n.ilog10() as u8 - 3
+	n.ilog10().max(3) as u8 - 3
 }
 
 // inspired from https://github.com/tokio-rs/tokio/blob/master/examples/echo-tcp.rs

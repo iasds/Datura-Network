@@ -160,6 +160,7 @@ async fn control_thread(
 					let (vm_tx, vm_rx) = oneshot::channel::<bool>();
 					tx.send((challenge, solution, vm_tx)).await.unwrap();
 					if vm_rx.await.unwrap() && store::check_free_space(n) {
+						store_challenges.lock().await.remove(&(addr.ip(), n));
 						match store::read_from(&mut socket, n).await {
 							Ok(id) => socket.write(&id).await.unwrap(),
 							Err(_) => todo!(),

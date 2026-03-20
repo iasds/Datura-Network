@@ -11,6 +11,11 @@ randomx-rs = "1.4.1"
 tokio = { version = "1.49.0", features = ["full"] }
 const-hex = "1.18.1"
 
+[profile.release]
+strip = "symbols"
+panic = "abort"
+lto = true
+
 [[bin]]
 name = "client"
 

@@ -64,6 +64,7 @@ fn main() {
         for stream in listener.incoming() {
             let mut stream = stream.unwrap();
 
+            let now = std::time::Instant::now();
             let mut padded_pk: Vec<u8> = pk.as_slice().to_vec();
             // Use 0s for padding here, but should implement random bytes to hide
             // the fact that this is a key.
@@ -87,6 +88,7 @@ fn main() {
 
             let mut receiver_context = hpke.setup_receiver(
                 &c, &sk, b"", None, None, None).unwrap();
+            println!("[Node B] Received ciphertext and derived shared secret in {:?}", now.elapsed());
 
 
             let mut encrypted: Vec<u8> = vec![];
@@ -108,7 +110,9 @@ fn main() {
             println!("[Node B] Encrypted hash: {}", calc_hash(&encrypted));
 
 
+            let now = std::time::Instant::now();
             let decrypted: Vec<u8> = receiver_context.open(b"", &encrypted).unwrap();
+            println!("[Node B] Decrypted data in {:?}", now.elapsed());
             let decrypted_len = decrypted.len();
 
             // top + bottom half of number that indicates padding amount
@@ -121,6 +125,7 @@ fn main() {
             println!("[Node B] Decrypted size: {} bytes", decrypted_len);
             println!("[Node B] Decrypted hash: {}", calc_hash(&decrypted));
             println!("[Node B] Len padding: {len_padding}");
+            println!("\n");
         }
 
 
@@ -144,6 +149,8 @@ fn main() {
 
             // Connection bewteen Node A and Node B
             let mut send_stream = TcpStream::connect(format!("127.0.0.1:{}", server_listen_port)).unwrap();
+
+            let now = std::time::Instant::now();
 
             let mut first_half_padded_pk = [0u8; PACKET_SIZE];
             let mut second_half_padded_pk = [0u8; PACKET_SIZE];
@@ -169,7 +176,7 @@ fn main() {
             // Send ciphertext to server
             send_stream.write(&padded_c[..PACKET_SIZE]).unwrap();
             send_stream.write(&padded_c[PACKET_SIZE..]).unwrap();
-            println!("[Node A] Sent ciphertext to Node B");
+            println!("[Node A] Created and sent KEM ciphertext to Node B in {:?}", now.elapsed());
 
 
             let mut msg = Vec::new();
@@ -177,6 +184,7 @@ fn main() {
             // informs for length of padding
             let last_chunk_size;
             // read data to be sent to server node b
+            let now = std::time::Instant::now();
             loop {
                 let mut buf: [u8; PACKET_SIZE] = [0; PACKET_SIZE];
                 let s = recv_stream.read(&mut buf).unwrap();
@@ -186,6 +194,7 @@ fn main() {
                     break;
                 }
             }
+            println!("[Node A] Received data to send in {:?}", now.elapsed());
 
 
 
@@ -194,6 +203,7 @@ fn main() {
             // padding (0- (PACKET_SIZE - 16 - 2) bytes)
             // len_padding (2 bytes)
             // AEAD tag (16 bytes)
+
 
             let padding_len: usize;
             // Need 2 bytes for len of padding, 16 for chacha20poly1305 tag.
@@ -217,7 +227,8 @@ fn main() {
             let msg_len = msg.len();
 
             // Remove AEAD_TAG_SIZE bytes off the end (guaranteed last 18 bytes
-            // are 0 at this point)
+            // are 0 at this point, because msg vector was extended with [0; PACKET_SIZE]
+            // in loop)
             for i in 1..=AEAD_TAG_SIZE {
                 msg.remove(msg_len - i);
             }
@@ -234,9 +245,11 @@ fn main() {
             msg[msg_len - 1] = bottom_half_len_padding;
 
 
+            let now = std::time::Instant::now();
             // No AAD
             let msg_encrypted: Vec<u8> = sender_context.seal(
                 b"", &msg).unwrap();
+            println!("[Node A] Encrypted padded data in {:?}", now.elapsed());
 
             println!("[Node A] Unencrypted size: {msg_len} bytes");
             println!("[Node A] Unencrypted hash: {}", calc_hash(&msg));
@@ -246,14 +259,16 @@ fn main() {
 
 
             let num_packets = msg_encrypted.len() / PACKET_SIZE;
-            //let mut send_stream = TcpStream::connect(format!("127.0.0.1:{}", server_listen_port)).unwrap();
+
+            let now = std::time::Instant::now();
             println!("[Node A] Sending {num_packets} packets");
             for i in 0..num_packets {
                 let start_index = i * PACKET_SIZE;
                 let end_index = (i + 1) * PACKET_SIZE;
                 send_stream.write(&msg_encrypted[start_index..end_index]).unwrap();
             }
-            //send_stream.shutdown(std::net::Shutdown::Both).unwrap();
+            println!("[Node A] Sent {} bytes in {:?}", msg_encrypted.len(), now.elapsed());
+            println!("\n");
 
         }
 

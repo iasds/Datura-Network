@@ -9,14 +9,22 @@ use hpke_rs_libcrux::HpkeLibcrux;
 
 
 // Can be changed
-const PACKET_SIZE: usize = 1024;
+const PACKET_SIZE: usize = 1337;
 // tag for poly1305
 const AEAD_TAG_SIZE: usize = 16;
 // Indicates length of padding; uses 2 bytes
 const PADDING_INDICATOR_SIZE: usize = 2;
 
-const PUB_ENCAP_KEY_LEN: usize = 1216;
+const KEM_PUBKEY_LEN: usize = 1216;
 const CIPHERTEXT_LEN: usize = 1120;
+
+const NUM_PACKETS_KEM_PUBKEY: usize = (CIPHERTEXT_LEN as f32 / PACKET_SIZE as f32).ceil() as usize;
+const NUM_PACKETS_KEM_CIPHERTEXT: usize = (CIPHERTEXT_LEN as f32 / PACKET_SIZE as f32).ceil() as usize;
+
+const KEM_PUBKEY_PADDING_AMOUNT: usize = NUM_PACKETS_KEM_PUBKEY * PACKET_SIZE - KEM_PUBKEY_LEN;
+const KEM_C_PADDING_AMOUNT: usize = NUM_PACKETS_KEM_CIPHERTEXT * PACKET_SIZE - CIPHERTEXT_LEN;
+
+
 
 fn usage_and_die() {
     eprintln!("Usage:");
@@ -26,14 +34,57 @@ fn usage_and_die() {
     std::process::exit(-1);
 }
 
+
 fn calc_hash<T: Hash>(t: &T) -> u64 {
     let mut s = DefaultHasher::new();
     t.hash(&mut s);
     s.finish()
 }
 
+
+fn send_equal_data_per_packet(stream: &mut TcpStream, data: &Vec<u8>) -> usize{
+    /*
+     * Returns amount of data sent.
+     */
+
+    // data.len() should be a multiple of PACKET_SIZE already
+    let num_packets = data.len() / PACKET_SIZE;
+    let mut start = 0;
+    for _ in 0..num_packets {
+        stream.write(&data[start..(start + PACKET_SIZE)]).unwrap();
+        start += PACKET_SIZE;
+    }
+    start
+}
+
+
+fn receive_packets(stream: &mut TcpStream, out_buf: &mut Vec<u8>) -> usize {
+    /*
+     * Returns size of last packet read.
+     */
+    loop {
+        let mut buf: [u8; PACKET_SIZE] = [0; PACKET_SIZE];
+        let s = stream.read(&mut buf).unwrap();
+
+        if s == 0 {
+            return 0;
+        }
+
+        // Extend after checking s == 0, so if 0 bytes are read, then that doesn't
+        // get added to vector
+        out_buf.extend(&buf);
+
+        if s < PACKET_SIZE {
+            return s;
+        }
+
+    }
+}
+
+
 fn main() {
 
+    println!("PACKET_SIZE is {PACKET_SIZE}");
     let args: Vec<String> = std::env::args().collect();
 
     if args.len() < 2 {
@@ -53,9 +104,9 @@ fn main() {
     );
 
 
-    if role == "server" { // B
 
-        let (sk, pk) = hpke.generate_key_pair().unwrap().into_keys();
+    if role == "server" { // Node B
+
 
         let server_listen_port: i32 = args[2].parse().unwrap();
         let listener = TcpListener::bind(format!("127.0.0.1:{}", server_listen_port)).unwrap();
@@ -65,46 +116,42 @@ fn main() {
             let mut stream = stream.unwrap();
 
             let now = std::time::Instant::now();
-            let mut padded_pk: Vec<u8> = pk.as_slice().to_vec();
+
+            let (server_sk, server_pk) = hpke.generate_key_pair().unwrap().into_keys();
+            let mut padded_pk: Vec<u8> = server_pk.as_slice().to_vec();
             // Use 0s for padding here, but should implement random bytes to hide
             // the fact that this is a key.
-            // 1216 is X-Wing ecapsulation public key length. Need two packets
-            // to fit one pubkey, hence 2 * PACKET_SIZE. Subtract len, since that
-            // space is taken up by pubkey already.
-            padded_pk.extend_from_slice(&[0 as u8; 2 * PACKET_SIZE - PUB_ENCAP_KEY_LEN]);
-            // send first half of PK to client
-            stream.write(&padded_pk[..PACKET_SIZE]).unwrap();
-            // send second half
-            stream.write(&padded_pk[PACKET_SIZE..]).unwrap();
+            // 1216 is X-Wing ecapsulation public key length.
+            padded_pk.extend_from_slice(&[0 as u8; KEM_PUBKEY_PADDING_AMOUNT]);
+            send_equal_data_per_packet(&mut stream, &padded_pk);
+            println!("[Node B] Sent encapsulation key to Node A in {:?}", now.elapsed());
 
-            println!("[Node B] Sent encapsulation key to Node A");
-            // Receive padded ciphertext. It is two packets wide.
-            let mut padded_c = [0 as u8; PACKET_SIZE * 2];
-            stream.read_exact(&mut padded_c).unwrap();
+
+            // Receive padded ciphertext.
+
+            let mut padded_c: Vec<u8> = Vec::new();
+            for _ in 0..NUM_PACKETS_KEM_CIPHERTEXT {
+                let mut buf: [u8; PACKET_SIZE] = [0; PACKET_SIZE];
+                stream.read_exact(&mut buf).unwrap();
+                padded_c.extend(buf);
+            }
+
             println!("[Node B] Received ciphertext from Node A");
 
             // X-Wing ciphertext len is 1120 bytes, so chop of extra padding
             let c = &padded_c[..CIPHERTEXT_LEN];
 
+            let now = std::time::Instant::now();
             let mut receiver_context = hpke.setup_receiver(
-                &c, &sk, b"", None, None, None).unwrap();
-            println!("[Node B] Received ciphertext and derived shared secret in {:?}", now.elapsed());
+                &c, &server_sk, b"", None, None, None).unwrap();
+            println!("[Node B] Derived shared secret in {:?}", now.elapsed());
 
+
+            // Process encrypted data
 
             let mut encrypted: Vec<u8> = vec![];
 
-            loop {
-                let mut buf: [u8; PACKET_SIZE] = [0; PACKET_SIZE];
-                let s = stream.read(&mut buf).unwrap();
-                if s == 0 {
-                    break;
-                }
-                // Extend after checking s, so if 0 bytes are read, then that doesn't
-                // get added to vector
-                encrypted.extend(&buf);
-            }
-
-            //println!("[Node B] {:?}", encrypted);
+            receive_packets(&mut stream, &mut encrypted);
 
             println!("[Node B] Encrypted size: {} bytes", encrypted.len());
             println!("[Node B] Encrypted hash: {}", calc_hash(&encrypted));
@@ -144,56 +191,43 @@ fn main() {
 
             let mut recv_stream = stream.unwrap();
 
-            // These aren't used
-            //let (sk, pk) = hpke.generate_key_pair().unwrap().into_keys();
-
             // Connection bewteen Node A and Node B
             let mut send_stream = TcpStream::connect(format!("127.0.0.1:{}", server_listen_port)).unwrap();
 
-            let now = std::time::Instant::now();
 
-            let mut first_half_padded_pk = [0u8; PACKET_SIZE];
-            let mut second_half_padded_pk = [0u8; PACKET_SIZE];
-            send_stream.read_exact(&mut first_half_padded_pk).unwrap();
-            send_stream.read_exact(&mut second_half_padded_pk).unwrap();
-            let mut server_padded_pk = Vec::new();
-            server_padded_pk.extend_from_slice(&first_half_padded_pk);
-            server_padded_pk.extend_from_slice(&second_half_padded_pk);
+            // Receive KEM pubkey and setup ciphertext
+            let mut padded_pubkey: Vec<u8> = Vec::new();
+            for _ in 0..NUM_PACKETS_KEM_PUBKEY {
+                let mut buf: [u8; PACKET_SIZE] = [0; PACKET_SIZE];
+                send_stream.read_exact(&mut buf).unwrap();
+                padded_pubkey.extend(buf);
+            }
 
             println!("[Node A] Received encapsulation key from Node B");
 
-            let server_pk_buf = &server_padded_pk[..PUB_ENCAP_KEY_LEN];
+            let now = std::time::Instant::now();
 
-            let server_pk = HpkePublicKey::new(server_pk_buf.to_vec());
+            let server_pubkey = HpkePublicKey::new(padded_pubkey[..KEM_PUBKEY_LEN].to_vec());
             let (c, mut sender_context) =
-                hpke.setup_sender(&server_pk, b"", None, None, None).unwrap();
-
+                hpke.setup_sender(&server_pubkey, b"", None, None, None).unwrap();
 
             let mut padded_c: Vec<u8> = Vec::new();
             padded_c.extend_from_slice(&c);
-            padded_c.extend_from_slice(&[0 as u8; 2 * PACKET_SIZE - CIPHERTEXT_LEN]);
+            padded_c.extend_from_slice(&[0 as u8; KEM_C_PADDING_AMOUNT]);
 
             // Send ciphertext to server
-            send_stream.write(&padded_c[..PACKET_SIZE]).unwrap();
-            send_stream.write(&padded_c[PACKET_SIZE..]).unwrap();
+            send_equal_data_per_packet(&mut send_stream, &padded_c);
             println!("[Node A] Created and sent KEM ciphertext to Node B in {:?}", now.elapsed());
 
 
             let mut msg = Vec::new();
 
-            // informs for length of padding
-            let last_chunk_size;
-            // read data to be sent to server node b
             let now = std::time::Instant::now();
-            loop {
-                let mut buf: [u8; PACKET_SIZE] = [0; PACKET_SIZE];
-                let s = recv_stream.read(&mut buf).unwrap();
-                msg.extend(&buf);
-                if s < PACKET_SIZE {
-                    last_chunk_size = s;
-                    break;
-                }
-            }
+
+            // informs for length of padding. Essentially this is the same
+            // as len(total read data) % (PACKET_SIZE); len of the last chunk
+            let last_chunk_size = receive_packets(&mut recv_stream, &mut msg);
+
             println!("[Node A] Received data to send in {:?}", now.elapsed());
 
 
@@ -207,16 +241,18 @@ fn main() {
 
             let padding_len: usize;
             // Need 2 bytes for len of padding, 16 for chacha20poly1305 tag.
-            // If < 2 bytes left at end of last chunk, need a new chunk.
+            // If < 18 bytes left at end of last chunk, need a new chunk.
             if (PACKET_SIZE - last_chunk_size) < (PADDING_INDICATOR_SIZE + AEAD_TAG_SIZE) {
 
-                // Add padding for original chunk
+                // Add padding for original chunk (going to be < 18 bytes)
                 let len_padding_on_first_chunk = PACKET_SIZE - last_chunk_size;
-                // Need padding for another chunk that can fit len_padding
+                // Need padding for another chunk that can fit both len_padding and aead tag
                 let len_padding_new_chunk = PACKET_SIZE - (PADDING_INDICATOR_SIZE + AEAD_TAG_SIZE);
                 padding_len = len_padding_on_first_chunk + len_padding_new_chunk;
-                // Extend by another packet size. End of packet will be modified later
-                msg.extend([0 as u8; PACKET_SIZE -  AEAD_TAG_SIZE]);
+                // Fill the remaining <18 bytes with 0, then add 0s the size of another packet.
+                // The last 16 will be removed to make space for the aead tag.
+                msg.extend(vec![0; last_chunk_size]);
+                msg.extend([0 as u8; PACKET_SIZE]);
 
             } else {
                 // This case, there is room for 2 + 16 bytes at end. No need
@@ -228,7 +264,7 @@ fn main() {
 
             // Remove AEAD_TAG_SIZE bytes off the end (guaranteed last 18 bytes
             // are 0 at this point, because msg vector was extended with [0; PACKET_SIZE]
-            // in loop)
+            // in loop and in check above; and we checked there was enough room)
             for i in 1..=AEAD_TAG_SIZE {
                 msg.remove(msg_len - i);
             }
@@ -262,12 +298,10 @@ fn main() {
 
             let now = std::time::Instant::now();
             println!("[Node A] Sending {num_packets} packets");
-            for i in 0..num_packets {
-                let start_index = i * PACKET_SIZE;
-                let end_index = (i + 1) * PACKET_SIZE;
-                send_stream.write(&msg_encrypted[start_index..end_index]).unwrap();
-            }
-            println!("[Node A] Sent {} bytes in {:?}", msg_encrypted.len(), now.elapsed());
+
+            let bytes_sent = send_equal_data_per_packet(&mut send_stream, &msg_encrypted);
+
+            println!("[Node A] Sent {} bytes in {:?}", bytes_sent, now.elapsed());
             println!("\n");
 
         }

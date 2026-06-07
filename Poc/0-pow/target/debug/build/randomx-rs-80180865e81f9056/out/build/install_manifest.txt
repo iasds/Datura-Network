@@ -1,2 +1,0 @@
-/home/user/projects/Datura-Network/Poc/0-pow/target/debug/build/randomx-rs-80180865e81f9056/out/lib/librandomx.a
-/home/user/projects/Datura-Network/Poc/0-pow/target/debug/build/randomx-rs-80180865e81f9056/out/include/randomx.h

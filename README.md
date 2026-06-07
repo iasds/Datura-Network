@@ -12,10 +12,11 @@ Please [read the specification document](spec/specification.md) to know where we
 
 The contribution process heavily follows how we handle [contributions for the opsec bible](http://opbible7nans45sg33cbyeiwqmlp5fu7lklu6jd6f3mivrjeqadco5yd.onion/opsec/contribute/). Payments are as they are advertised on our [xmrbazaar listing](https://xmrbazaar.com/listing/cwGf/):
 
-The rewards are based on the (justified) complexity tags on the project board http://gdatura24gtdy23lxd7ht3xzx6mi7mdlkabpvuefhrjn4t5jduviw5ad.onion/nihilist/Datura-Network/projects/19 (i pledge to not change those prices for the entirety of Q4 2025)
-- Simple (0.0175 to 0.0701xmr)
-- Doable (0.0701 to 0.1052xmr)
-- Complex (0.1052 to 0.1754xmr)
+The rewards are based on the (justified) complexity tags on the project board http://gdatura24gtdy23lxd7ht3xzx6mi7mdlkabpvuefhrjn4t5jduviw5ad.onion/nihilist/Datura-Network/projects/19 (i pledge to not change those prices for the entirety of 2026)
+
+- Simple (0.035 to 0.1402xmr)
+- Doable (0.1402 to 0.2104xmr)
+- Complex (0.2104 to 0.3508xmr)
 
 First of all you can create a git account on the git datura instance ran by us by [signing up here](http://gdatura24gtdy23lxd7ht3xzx6mi7mdlkabpvuefhrjn4t5jduviw5ad.onion/user/sign_up), (you don't need to mention a real email, there's no email verification anyway).
 

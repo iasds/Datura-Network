@@ -1,0 +1,58 @@
+This PoC heavily builds upon 6.1-alloc-bandwidth and 6-throttling. The documentation
+concerning bandwidth and challenge management are in these two subprojects.
+
+![spec_diagram](./spec.png "Spec diagram")
+
+```plantuml
+@startuml
+actor Client
+box "Server"
+control Control
+database Store
+end box
+
+hide footbox
+
+== Bandwidth ==
+
+Client -> Control : Access request (**KNOCK**)
+
+Client <- Control ++ #red : Access challenge (tailored for bandwidth)
+
+...
+
+Client -> Control : **KNOCK**
+Client <- Control : Saved access challenge
+Client -> Control -- : Solution
+
+Control -> Control : Open bandwidth for client
+
+== Storage ==
+
+Client -> Control : Storage request (**PUT n**)
+Client <- Control ++ #red : Challenge (tailored for data size **n**)
+
+...
+
+Client -> Control : **PUT n**
+Client <- Control : Saved size challenge
+Client -> Control -- : Solution
+
+Control -> Store : Is there at least **n** free space?
+Control <- Store : Yes.
+
+
+Client -> Control : Data (size **n**)
+Control -> Store : Data (size **n**)
+
+Control <- Store : Randomly-generated 256-bit data ID
+Client <- Control : data ID
+
+...
+
+Client -> Control : Retrieval (**GET dataid**)
+Control -> Store : Request for **dataid**
+Control <- Store : Data associated with **dataid**
+Client <- Control : Data
+@enduml
+```

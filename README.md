@@ -1,6 +1,6 @@
 # Datura Network (WIP)
 
-Datura Network is going to be a new Darknet (like [Tor](http://opbible7nans45sg33cbyeiwqmlp5fu7lklu6jd6f3mivrjeqadco5yd.onion/opsec/torhoneypot/) or I2P), that is going to be written in rust. It will be designed in such a way that state-level threats of passive network analysis, active sybil attacks and disruptive DDoS attacks are rendered useless to conduct against it's very design. 
+Datura Network is going to be a new Darknet (like [Tor](http://opbible7nans45sg33cbyeiwqmlp5fu7lklu6jd6f3mivrjeqadco5yd.onion/opsec/torhoneypot/) or I2P), that is going to be written in Rust. It will be designed in such a way that state-level threats of passive network analysis, active Sybil attacks and disruptive DDoS attacks are rendered useless to conduct against its very design.
 
 ![](daturasmall.png)
 
@@ -8,14 +8,15 @@ Datura Network will provide bi-directional anonymity on the TCP/IP layer **at al
 
 Please [read the specification document](spec/specification.md) to know where we're at on the brainstorming of the project, it'll get you up to speed.
 
-## How can I contribute ?
+## How can I contribute?
 
 The contribution process heavily follows how we handle [contributions for the opsec bible](http://opbible7nans45sg33cbyeiwqmlp5fu7lklu6jd6f3mivrjeqadco5yd.onion/opsec/contribute/). Payments are as they are advertised on our [xmrbazaar listing](https://xmrbazaar.com/listing/cwGf/):
 
-The rewards are based on the (justified) complexity tags on the project board http://gdatura24gtdy23lxd7ht3xzx6mi7mdlkabpvuefhrjn4t5jduviw5ad.onion/nihilist/Datura-Network/projects/19 (i pledge to not change those prices for the entirety of Q4 2025)
-- Simple (0.0175 to 0.0701xmr)
-- Doable (0.0701 to 0.1052xmr)
-- Complex (0.1052 to 0.1754xmr)
+The rewards are based on the (justified) complexity tags on the project board http://gdatura24gtdy23lxd7ht3xzx6mi7mdlkabpvuefhrjn4t5jduviw5ad.onion/nihilist/Datura-Network/projects/19 (i pledge to not change those prices for the entirety of 2026)
+
+- Simple (0.035 to 0.1402xmr)
+- Doable (0.1402 to 0.2104xmr)
+- Complex (0.2104 to 0.3508xmr)
 
 First of all you can create a git account on the git datura instance ran by us by [signing up here](http://gdatura24gtdy23lxd7ht3xzx6mi7mdlkabpvuefhrjn4t5jduviw5ad.onion/user/sign_up), (you don't need to mention a real email, there's no email verification anyway).
 
@@ -25,7 +26,7 @@ So you have 3 ways you can contribute to the project:
 2) help us write the proof of concepts: simply ask to be assigned on any issue on the [PoC project board](http://gdatura24gtdy23lxd7ht3xzx6mi7mdlkabpvuefhrjn4t5jduviw5ad.onion/nihilist/Datura-Network/projects/19) and we'll assign it to you with a deadline of 2 weeks if that's your first contribution, or 4 weeks if you have delivered before. **(and of course we'll pay you in monero if you complete a todolist for us)**
 3) and lastly if you want to donate to us to fund this project you can donate to us at this XMR address: **84Zqdr7o2RfTKRhjc6SR3TdhK1yLxRLMPARU3PMvmyH8XmCgMoBHa7X8YoM7WphfbkJsjQ4SeEQCr4Nn2uzJSfCD9KiBu9E** (we're anyway going to reuse those funds to pay the developers on this project). When the project will be fully planned out, we'll also create a crowd fundraiser to ensure the developers are all properly paid for their work.
 
-## What's the overall progress on the project ?
+## What's the overall progress on the project?
 
 For now we are still in the brainstorming and planning phase.
 

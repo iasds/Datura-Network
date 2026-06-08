@@ -3,8 +3,6 @@
 ```
 cargo build --release
 
-./target/release/client - the client that will try to communicate using udp
-./target/release/server - the server that will receive the udp encapsuled inside the tcp
 ```
 
 # Testing:

@@ -10,9 +10,10 @@
 ///   EXTENDED   – hop → client:   extension complete; payload = next-hop X25519 pubkey
 ///   RELAY      – any direction:  507-byte onion-encrypted payload (no AEAD tag, stream cipher only)
 ///   DATA       – inner payload:  [len:2][data:N] — visible only after all layers are peeled
-///   BRIDGE     – rendezvous:     link two circuit legs together
-///   INTRO      – client → intro: tell HS to meet client at RV node
-///   RENDEZVOUS – HS → rv:        HS arrives; bridge to waiting client circuit
+///   BRIDGE     – HS → RV relay:  link two circuit legs; payload = [client_circuit_id:4 LE]
+///   INTRO      – HS → intro:     hidden service registers with the intro point
+///   RENDEZVOUS – intro → HS:     intro forwards client's RV info; payload = [addr_len:1][rv_addr:N][circuit_id:4 LE]
+///   CONNECT    – client → intro: request HS connection; payload = [addr_len:1][rv_addr:N][circuit_id:4 LE]
 
 use std::io::{Read, Write};
 use std::net::TcpStream;
@@ -29,6 +30,7 @@ pub const TYPE_DATA:       u8 = 0x06;
 pub const TYPE_BRIDGE:     u8 = 0x07;
 pub const TYPE_INTRO:      u8 = 0x08;
 pub const TYPE_RENDEZVOUS: u8 = 0x09;
+pub const TYPE_CONNECT:    u8 = 0x0A;
 
 #[derive(Clone)]
 pub struct Cell {

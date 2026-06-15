@@ -1,0 +1,17 @@
+[package]
+name = "socks5"
+version = "0.0.0"
+edition = "2024"
+
+[dependencies]
+fast-socks5 = "0.9"
+tokio = { version = "1", features = ["full"] }
+
+# Future: replace tokio with compio for zero-copy sends (send_zc)
+# compio = { version = "0.14", features = ["net"] }
+#
+# Future: embedded Tor routing
+# arti-client = "0.23"
+#
+# Future: embedded I2P routing
+# emissary-core = "0.2"

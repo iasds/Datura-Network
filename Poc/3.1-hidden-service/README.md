@@ -32,18 +32,18 @@ sudo danted -f /etc/danted.conf
 
 5. start the mid/exit node:
 ```
-./target/release/socks5 --listen 0.0.0.0:5000
+./target/release/hidden-service --port 5001
 ```
 
 6. start the entry node:
 ```
-./target/release/socks5 --proxy 127.0.0.1:9055 --remote-host 127.0.0.1 --remote-port 5000 --listen 127.0.0.1:4000
+./target/release/hidden-service --port 4000 --proxy 127.0.0.1 --proxy-port 9055 --remote-host hiddenserviceajshhsbdbdbdb.dn --remote-port 80
 ```
 
 7. Send packet
 ```
 echo -n "Proxying UDP through TCP" | nc -u -q1 127.0.0.1 4000
-echo -n "Sending regular TCP" | nc -q1 127.0.0.1 4000
+python3 -c "import socket,struct; s=socket.create_connection(('127.0.0.1',4000)); msg=b'Sending regular TCP'; s.sendall(struct.pack('>I',len(msg))+msg); s.recv(4)"
 ```
 
 # Notes
@@ -52,10 +52,16 @@ echo -n "Sending regular TCP" | nc -q1 127.0.0.1 4000
 ## Entry Node Output
 
 ```
+[entry] UDP datagram from 127.0.0.1:XXXXX → hiddenserviceajshhsbdbdbdb.dn (DaturaHidden)
+[dns] hiddenserviceajshhsbdbdbdb.dn → 127.0.0.1:5001
 UDP out: "Proxying UDP through TCP"
 tunnel out: "Proxying UDP through TCP"
+[entry] TCP connection from 127.0.0.1:XXXXX → hiddenserviceajshhsbdbdbdb.dn (DaturaHidden)
+[dns] hiddenserviceajshhsbdbdbdb.dn → 127.0.0.1:5001
+[conn] opened: 127.0.0.1:XXXXX → 127.0.0.1:5001 (DaturaHidden)
 TCP out: "Sending regular TCP"
 tunnel out: "Sending regular TCP"
+[conn] closed: 127.0.0.1:XXXXX after X.XXs
 ```
 
 ## Mid/Exit Node Output

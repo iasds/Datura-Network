@@ -108,6 +108,7 @@ fn main() {
     let mut proxy_port: Option<u16> = None;
     let mut remote_host: Option<String> = None;
     let mut remote_port: Option<u16> = None;
+    let mut listen_addr: Option<String> = None;
 
     for pair in args.windows(2) {
         match pair[0].as_str() {
@@ -116,14 +117,23 @@ fn main() {
             "--proxy-port" => proxy_port = Some(pair[1].parse().expect("invalid --proxy-port")),
             "--remote-host" => remote_host = Some(pair[1].clone()),
             "--remote-port" => remote_port = Some(pair[1].parse().expect("invalid --remote-port")),
+            "--listen" => listen_addr = Some(pair[1].clone()),
             _ => {}
         }
     }
 
-    let port = port.unwrap_or_else(|| {
-        eprintln!("--port is required");
-        std::process::exit(1);
-    });
+    let (port, bind_host) = if let Some(ref la) = listen_addr {
+        let mut parts = la.rsplitn(2, ':');
+        let p: u16 = parts.next().expect("--listen missing port").parse().expect("invalid port in --listen");
+        let h = parts.next().unwrap_or("127.0.0.1").to_string();
+        (p, h)
+    } else {
+        let p = port.unwrap_or_else(|| {
+            eprintln!("--port or --listen is required");
+            std::process::exit(1);
+        });
+        (p, "127.0.0.1".to_string())
+    };
 
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
@@ -135,10 +145,10 @@ fn main() {
             let proxy_addr = format!("{}:{}", p, pp);
             let dns_map = Arc::new(build_dns_map());
             let conn_map: ConnectionMap = Arc::new(Mutex::new(HashMap::new()));
-            runtime.block_on(entry_node(port, proxy_addr, rh, rp, dns_map, conn_map));
+            runtime.block_on(entry_node(port, bind_host, proxy_addr, rh, rp, dns_map, conn_map));
         }
         (None, None, None, None) => {
-            runtime.block_on(mid_exit_node(port));
+            runtime.block_on(mid_exit_node(port, bind_host));
         }
         _ => {
             eprintln!("entry node requires --port, --proxy, --proxy-port, --remote-host, --remote-port");
@@ -150,13 +160,14 @@ fn main() {
 
 async fn entry_node(
     port: u16,
+    bind_host: String,
     proxy_addr: String,
     remote_host: String,
     remote_port: u16,
     dns_map: Arc<HashMap<String, String>>,
     conn_map: ConnectionMap,
 ) {
-    let bind_ip = format!("127.0.0.1:{}", port);
+    let bind_ip = format!("{}:{}", bind_host, port);
 
     let udp = UdpSocket::bind(bind_ip.clone())
         .await
@@ -272,7 +283,7 @@ async fn entry_node(
             };
             let mut tcp_buffer = vec![0u8; msg_len];
             match stream.read_exact(&mut tcp_buffer).await {
-                Ok(()) => {
+                Ok(_) => {
                     let payload = tcp_buffer;
                     println!("TCP out: {:?}", String::from_utf8_lossy(&payload));
                     if let Err(e) = tunnel(proxy, resolved_host, resolved_port, payload).await {
@@ -323,8 +334,8 @@ async fn tunnel(proxy: String, host: String, port: u16, payload: Vec<u8>) -> fas
     Ok(())
 }
 
-async fn mid_exit_node(port: u16) {
-    let listener = TcpListener::bind(format!("127.0.0.1:{}", port))
+async fn mid_exit_node(port: u16, bind_host: String) {
+    let listener = TcpListener::bind(format!("{}:{}", bind_host, port))
         .await
         .expect("failed to bind TCP");
 

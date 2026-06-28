@@ -78,10 +78,6 @@ struct ConnectionState {
 
 type ConnectionMap = Arc<Mutex<HashMap<std::net::SocketAddr, ConnectionState>>>;
 
-/// SansIO-compatible transport abstraction.
-/// Current implementor: TokioTcpTransport (tokio).
-/// Future implementors: CompioTcpTransport (compio + send_zc),
-///                      WebRtcTransport, InfiniBandTransport.
 trait Transport {
     async fn send(&mut self, buf: &[u8]) -> std::io::Result<usize>;
     async fn recv(&mut self, buf: &mut [u8]) -> std::io::Result<usize>;
@@ -308,9 +304,7 @@ async fn entry_node(
     }
 }
 
-// NOTE: This function is the primary I/O site and a candidate for the Transport trait refactor.
-// When compio is introduced, replace Socks5Stream with a CompioTcpTransport wrapping
-// compio's TcpStream. The length-prefix framing below is transport-agnostic.
+// This is the udp to tcp tunnel
 async fn tunnel(proxy: String, host: String, port: u16, payload: Vec<u8>) -> fast_socks5::Result<()> {
     let mut tcp = Socks5Stream::connect(proxy, host, port, Config::default()).await?;
 

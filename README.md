@@ -12,7 +12,7 @@ Please [read the specification document](spec/specification.md) to know where we
 
 The contribution process heavily follows how we handle [contributions for the opsec bible](http://opbible7nans45sg33cbyeiwqmlp5fu7lklu6jd6f3mivrjeqadco5yd.onion/opsec/contribute/). Payments are as they are advertised on our [xmrbazaar listing](https://xmrbazaar.com/listing/cwGf/):
 
-The rewards are based on the (justified) complexity tags on the project board http://gdatura24gtdy23lxd7ht3xzx6mi7mdlkabpvuefhrjn4t5jduviw5ad.onion/nihilist/Datura-Network/projects/19 (i pledge to not change those prices for the entirety of 2026)
+The rewards are based on the (justified) complexity tags on the project board http://gdatura24gtdy23lxd7ht3xzx6mi7mdlkabpvuefhrjn4t5jduviw5ad.onion/Nowhere/Datura-Network/projects/19 (i pledge to not change those prices for the entirety of 2026)
 
 - Simple (0.035 to 0.1402xmr)
 - Doable (0.1402 to 0.2104xmr)
@@ -22,8 +22,8 @@ First of all you can create a git account on the git datura instance ran by us b
 
 So you have 3 ways you can contribute to the project:
 
-1) help us brainstorm the project: pick any issue on the [brainstorming project board](http://gdatura24gtdy23lxd7ht3xzx6mi7mdlkabpvuefhrjn4t5jduviw5ad.onion/nihilist/Datura-Network/projects/16) and challenge it in case if we missed something
-2) help us write the proof of concepts: simply ask to be assigned on any issue on the [PoC project board](http://gdatura24gtdy23lxd7ht3xzx6mi7mdlkabpvuefhrjn4t5jduviw5ad.onion/nihilist/Datura-Network/projects/19) and we'll assign it to you with a deadline of 2 weeks if that's your first contribution, or 4 weeks if you have delivered before. **(and of course we'll pay you in monero if you complete a todolist for us)**
+1) help us brainstorm the project: pick any issue on the [brainstorming project board](http://gdatura24gtdy23lxd7ht3xzx6mi7mdlkabpvuefhrjn4t5jduviw5ad.onion/Nowhere/Datura-Network/projects/16) and challenge it in case if we missed something
+2) help us write the proof of concepts: simply ask to be assigned on any issue on the [PoC project board](http://gdatura24gtdy23lxd7ht3xzx6mi7mdlkabpvuefhrjn4t5jduviw5ad.onion/Nowhere/Datura-Network/projects/19) and we'll assign it to you with a deadline of 2 weeks if that's your first contribution, or 4 weeks if you have delivered before. **(and of course we'll pay you in monero if you complete a todolist for us)**
 3) and lastly if you want to donate to us to fund this project you can donate to us at this XMR address: **84Zqdr7o2RfTKRhjc6SR3TdhK1yLxRLMPARU3PMvmyH8XmCgMoBHa7X8YoM7WphfbkJsjQ4SeEQCr4Nn2uzJSfCD9KiBu9E** (we're anyway going to reuse those funds to pay the developers on this project). When the project will be fully planned out, we'll also create a crowd fundraiser to ensure the developers are all properly paid for their work.
 
 ## What's the overall progress on the project?

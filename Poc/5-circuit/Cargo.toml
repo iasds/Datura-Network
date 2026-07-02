@@ -1,0 +1,15 @@
+[package]
+name = "circuit"
+version = "0.0.0"
+edition = "2024"
+
+[[bin]]
+name = "circuit"
+path = "src/main.rs"
+
+[dependencies]
+x25519-dalek = { version = "2", features = ["static_secrets"] }
+chacha20 = "0.9"
+rand = "0.8"
+sha2 = "0.10"
+hkdf = "0.12"

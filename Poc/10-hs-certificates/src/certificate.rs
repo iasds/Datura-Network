@@ -69,7 +69,7 @@ pub struct Certificate {
     pub endorsement: Option<Endorsement>,
 }
 
-fn u128_to_fp(v: u128) -> pallas::Base {
+pub(crate) fn u128_to_fp(v: u128) -> pallas::Base {
     let mut repr = [0u8; 32];
     repr[..16].copy_from_slice(&v.to_le_bytes());
     pallas::Base::from_repr(repr).unwrap()
@@ -79,8 +79,42 @@ fn u128_to_fp(v: u128) -> pallas::Base {
 
 // This only works for hashes that are already valid canonical Fp encodings, not arbitrary SHA-family hashes
 // from the rest of the network's .dn addressing scheme.
-fn hash_bytes_to_fp(bytes: [u8; 32]) -> pallas::Base {
+pub(crate) fn hash_bytes_to_fp(bytes: [u8; 32]) -> pallas::Base {
     pallas::Base::from_repr(bytes).expect("hash bytes must be a canonical Fp encoding")
+}
+
+// Shared prove/verify plumbing over the one circuit this crate has. The
+// certificate and the routing instruction (routing.rs) are the same statement
+// shape: "the key behind instance[0] signed Poseidon(instance[1..4])"
+// so both go through these, reusing the same params and proving key.
+pub(crate) fn prove_signed_envelope(
+    sk: pallas::Scalar,
+    r_point: pallas::Affine,
+    s: pallas::Scalar,
+    instance: [pallas::Base; 4],
+) -> Vec<u8> {
+    let circuit = CertificateCircuit {
+        sk: halo2_proofs::circuit::Value::known(sk),
+        r_point: halo2_proofs::circuit::Value::known(r_point),
+        s: halo2_proofs::circuit::Value::known(s),
+    };
+    let mut transcript = Blake2bWrite::<_, EqAffine, _>::init(vec![]);
+    plonk::create_proof(
+        &PARAMS,
+        &PK,
+        &[circuit],
+        &[&[&instance]],
+        &mut OsRng,
+        &mut transcript,
+    )
+    .expect("create_proof");
+    transcript.finalize()
+}
+
+pub(crate) fn verify_signed_envelope(proof: &[u8], instance: [pallas::Base; 4]) -> bool {
+    let strategy = SingleVerifier::new(&PARAMS);
+    let mut transcript = Blake2bRead::<_, _, Challenge255<_>>::init(proof);
+    plonk::verify_proof(&PARAMS, PK.get_vk(), strategy, &[&[&instance]], &mut transcript).is_ok()
 }
 
 // Builds a certificate: Node B (the hidden service destination), w/ sk,
@@ -103,24 +137,8 @@ pub fn build_certificate(
     let k = pallas::Scalar::random(OsRng);
     let (r_point, s) = sign(sk, k, m);
 
-    let circuit = CertificateCircuit {
-        sk: halo2_proofs::circuit::Value::known(sk),
-        r_point: halo2_proofs::circuit::Value::known(r_point),
-        s: halo2_proofs::circuit::Value::known(s),
-    };
     let instance = [hs_hash_fp, rdv_hash_fp, expires_fp, challenge_fp];
-
-    let mut transcript = Blake2bWrite::<_, EqAffine, _>::init(vec![]);
-    plonk::create_proof(
-        &PARAMS,
-        &PK,
-        &[circuit],
-        &[&[&instance]],
-        &mut OsRng,
-        &mut transcript,
-    )
-    .expect("create_proof");
-    let proof = transcript.finalize();
+    let proof = prove_signed_envelope(sk, r_point, s, instance);
 
     Certificate {
         hs_hash: hs_hash_fp.to_repr(),
@@ -208,11 +226,7 @@ pub fn verify_certificate(cert: &Certificate) -> bool {
     };
     let expires_fp = pallas::Base::from(cert.expires);
     let challenge_fp = u128_to_fp(cert.pow_challenge);
-    let instance = [hs_hash_fp, rdv_hash_fp, expires_fp, challenge_fp];
-
-    let strategy = SingleVerifier::new(&PARAMS);
-    let mut transcript = Blake2bRead::<_, _, Challenge255<_>>::init(&cert.proof[..]);
-    plonk::verify_proof(&PARAMS, PK.get_vk(), strategy, &[&[&instance]], &mut transcript).is_ok()
+    verify_signed_envelope(&cert.proof, [hs_hash_fp, rdv_hash_fp, expires_fp, challenge_fp])
 }
 
 #[cfg(test)]

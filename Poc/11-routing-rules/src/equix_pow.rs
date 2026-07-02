@@ -33,7 +33,10 @@ pub fn solve_challenge(num_threads: usize, challenge: u128) -> [u8; 24] {
 
 	for t in 0..num_threads {
 		// each thread needs to search as far away from each other as they can
-		let mut salt: u64 = search_pos + search_inc*(t as u64);
+		// (wrapping: search_pos is a random u64, so plain + overflows about
+		// half the time with 2+ threads and panics in debug builds; salts
+		// only need to be spread out, not ordered, so wrap-around is harmless)
+		let mut salt: u64 = search_pos.wrapping_add(search_inc.wrapping_mul(t as u64));
 
 		let done_local = done.clone();
 		handles.push(thread::spawn(move || {
@@ -41,7 +44,7 @@ pub fn solve_challenge(num_threads: usize, challenge: u128) -> [u8; 24] {
 
 			// repeat Equi-X solutions until one matches requirements
 			loop {
-				salt += 1;
+				salt = salt.wrapping_add(1);
 
 				let mut seed = [0u8; 40];
 

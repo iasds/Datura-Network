@@ -39,31 +39,3 @@ pub async fn join_network(
             .add_peer(peer);
     }
 }
-
-pub async fn lookup(
-    target: [u8;32],
-    start: Peer,
-    routing: Arc<Mutex<RoutingTable>>,
-) -> Vec<Peer> {
-
-    let response =
-        client::rpc(
-            &mut routing.lock().unwrap(),
-            &start.addr.to_string(),
-            Message::FindNode {
-                target
-            },
-        )
-        .await;
-
-    match response {
-
-        Some(
-            Message::Nodes {
-                peers
-            }
-        ) => peers,
-
-        _ => vec![],
-    }
-}

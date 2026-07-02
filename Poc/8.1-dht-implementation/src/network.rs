@@ -5,11 +5,7 @@ use std::{
 use tokio::net::UdpSocket;
 
 use crate::{
-    identity::NodeId,
-    rpc::Message,
-    routing::RoutingTable,
-    storage::Storage,
-    routing::Peer,
+    identity::NodeId, routing::{Peer, RoutingTable}, rpc::Message, storage::Storage,
 };
 
 
@@ -19,6 +15,8 @@ pub async fn run_server(
     routing: Arc<Mutex<RoutingTable>>,
     storage: Arc<Mutex<Storage>>,
 ) -> Result<(), Box<dyn std::error::Error>> {
+
+    println!("Starting server with ID {:x?}", my_id);
 
     let socket = UdpSocket::bind(bind_addr).await?;
     let my_peer = Peer {
@@ -35,13 +33,6 @@ pub async fn run_server(
 
         let (size, sender) =
             socket.recv_from(&mut buffer).await?;
-
-        let sender_peer = Peer {
-            id: [0u8; 32], // unknown unless provided by message
-            addr: sender,
-        };
-
-        routing.lock().unwrap().add_peer(sender_peer);
 
         let msg: Message =
             serde_json::from_slice(&buffer[..size])?;

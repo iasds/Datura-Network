@@ -87,9 +87,10 @@ impl Identity {
     }
 
     pub fn print_info(&self) {
+        println!("Signing Key: {:x?}", self.signing_key.to_bytes());
+        println!("Public Key: {:x?}", self.verifying_key.as_bytes());
         println!("Node ID: {:x?}", self.node_id);
         println!("Node ID (hex string): {}", hex::encode(self.node_id));
-        println!("Public Key: {:x?}", self.verifying_key.as_bytes());
         println!("Address: {}.dn", self.get_address());
     }
     

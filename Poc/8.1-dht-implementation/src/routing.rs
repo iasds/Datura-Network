@@ -52,7 +52,7 @@ impl KBucket {
 
 pub struct RoutingTable {
 
-    /// Local node ID.
+    /// Local node peer.
     local_peer: Peer,
 
     /// 256 Kademlia buckets. Make it 32 for PoC?
@@ -61,12 +61,8 @@ pub struct RoutingTable {
 
 impl RoutingTable {
 
-    /// Keeps compatibility with your current code.
-    ///
-    /// If you don't know the local ID yet,
-    /// initialize to all zeros.
-    ///
-    /// Later call set_local_id().
+    /// initialize local ID to all zeros.
+    /// Later call set_local_peer().
     pub fn new() -> Self {
 
         let mut buckets = Vec::with_capacity(256);
@@ -119,82 +115,103 @@ impl RoutingTable {
             .insert(peer);
     }
 
-    /// Keeps compatibility.
-    pub fn all(&self) -> Vec<Peer> {
+    fn consider_bucket(
+        &self,
+        bucket_index: usize,
+        target: &NodeId,
+        count: usize,
+        best: &mut Vec<Peer>,
+    ) {
 
-        let mut peers: Vec<Peer> = Vec::new();
+        for peer in self.buckets[bucket_index].peers() {
 
-        for bucket in &self.buckets {
+            // avoid duplicates
+            if best.iter().any(|p| p.id == peer.id) {
+                continue;
+            }
 
-            for peer in bucket.peers() {
-                peers.push(peer.clone());
+            let distance =
+                xor_distance(&peer.id, target);
+
+            // Find insertion point.
+            let pos = best
+                .binary_search_by(|p| {
+                    xor_distance(&p.id, target)
+                        .cmp(&distance)
+                })
+                .unwrap_or_else(|e| e);
+
+            if pos < count {
+
+                best.insert(pos, peer.clone());
+
+                if best.len() > count {
+                    best.pop();
+                }
+
+            } else if best.len() < count {
+
+                best.push(peer.clone());
+
+                best.sort_by(|a, b| {
+                    xor_distance(&a.id, target)
+                        .cmp(&xor_distance(&b.id, target))
+                });
             }
         }
-
-        peers
     }
 
-    /// Keeps compatibility.
     pub fn closest(
         &self,
         target: NodeId,
         count: usize,
     ) -> Vec<Peer> {
 
-        let mut peers: Vec<Peer> =
-            self.all();
-
-        peers.sort_by(|a, b| {
-
-            xor_distance(
-                &a.id,
+        let center =
+            bucket_index(
+                &self.local_peer.id,
                 &target,
-            )
-            .cmp(
-                &xor_distance(
-                    &b.id,
+            );
+
+        let mut best: Vec<Peer> = Vec::with_capacity(count);
+
+        for radius in 0..256 {
+
+            //--------------------------------------------------
+            // left bucket
+            //--------------------------------------------------
+
+            if let Some(index) = center.checked_sub(radius) {
+                self.consider_bucket(
+                    index,
                     &target,
-                )
-            )
-        });
+                    count,
+                    &mut best,
+                );
+            }
 
-        peers.truncate(count);
+            //--------------------------------------------------
+            // right bucket
+            //--------------------------------------------------
 
-        peers
+            if radius != 0 {
+
+                let index = center + radius;
+
+                if index < 256 {
+                    self.consider_bucket(
+                        index,
+                        &target,
+                        count,
+                        &mut best,
+                    );
+                }
+            }
+        }
+
+        best
     }
 
-    /// Used by iterative FIND_NODE.
-    ///
-    /// Returns the nearest peer that has
-    /// not already been queried.
-    pub fn nearest_unqueried(
-        &self,
-        target: NodeId,
-        queried: &std::collections::HashSet<NodeId>,
-    ) -> Option<Peer> {
-
-        let mut peers = self.all();
-
-        peers.retain(|p| {
-            !queried.contains(&p.id)
-        });
-
-        peers.sort_by(|a, b| {
-
-            xor_distance(
-                &a.id,
-                &target,
-            )
-            .cmp(
-                &xor_distance(
-                    &b.id,
-                    &target,
-                )
-            )
-        });
-
-        peers.into_iter().next()
-    }
 }
 
 /// XOR distance.

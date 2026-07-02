@@ -19,13 +19,28 @@ pub async fn rpc(
             .await
             .ok()?;
 
+    // println!(
+    //     "Sending RPC to {}: {:?}",
+    //     destination, msg
+    // );
+
     let bytes =
         serde_json::to_vec(&msg).ok()?;
+
+    // println!(
+    //     "Serialized message ({} bytes): {:?}",
+    //     bytes.len(), bytes
+    // );
 
     socket
         .send_to(&bytes, destination)
         .await
         .ok()?;
+
+    // println!(
+    //     "Sent {} bytes to {}",
+    //     bytes.len(), destination
+    // );
 
     let mut buf = [0u8; 4096];
 
@@ -36,6 +51,11 @@ pub async fn rpc(
 
     let reply: Message =
         serde_json::from_slice(&buf[..len]).ok()?;
+
+    // println!(
+    //     "Received reply from {}: {:?}",
+    //     destination, reply
+    // );
 
     //-------------------------------------------------
     // AUTO PEER LEARNING

@@ -7,6 +7,7 @@ mod network;
 mod bootstrap;
 mod client;
 mod dht;
+mod lookup;
 
 use std::sync::{Arc, Mutex};
 use sha2::{Sha256, Digest};
@@ -109,8 +110,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
             if let Some(addr) = bootstrap_addr {
 
+                println!("Joining network via {:x?} at {}", bootstrap_id, addr);
+
                 bootstrap::join_network(
-                    addr,
+                    addr.clone(),
                     me,
                     routing.clone(),
                 )

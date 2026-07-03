@@ -2,10 +2,11 @@
 // repeatable function any party can call (ZK proof stays attached to the certificate for
 // independent client-side re-verification.)
 
+use std::sync::LazyLock;
+
 use ff::PrimeField;
 use group::ff::Field;
 use group::{prime::PrimeCurveAffine, GroupEncoding};
-use lazy_static::lazy_static;
 use pasta_curves::{pallas, EqAffine};
 use rand::rngs::OsRng;
 use serde::{Deserialize, Serialize};
@@ -30,18 +31,16 @@ use halo2_gadgets::poseidon::primitives::{ConstantLength, Hash as PoseidonHash, 
 // rather than every node regenerating them from scratch.
 pub const K: u32 = 12;
 
-lazy_static! {
-    static ref PARAMS: Params<EqAffine> = Params::new(K);
-    static ref PK: ProvingKey<EqAffine> = {
-        let empty = CertificateCircuit {
-            sk: halo2_proofs::circuit::Value::unknown(),
-            r_point: halo2_proofs::circuit::Value::unknown(),
-            s: halo2_proofs::circuit::Value::unknown(),
-        };
-        let vk = plonk::keygen_vk(&PARAMS, &empty).expect("keygen_vk");
-        plonk::keygen_pk(&PARAMS, vk, &empty).expect("keygen_pk")
+static PARAMS: LazyLock<Params<EqAffine>> = LazyLock::new(|| Params::new(K));
+static PK: LazyLock<ProvingKey<EqAffine>> = LazyLock::new(|| {
+    let empty = CertificateCircuit {
+        sk: halo2_proofs::circuit::Value::unknown(),
+        r_point: halo2_proofs::circuit::Value::unknown(),
+        s: halo2_proofs::circuit::Value::unknown(),
     };
-}
+    let vk = plonk::keygen_vk(&PARAMS, &empty).expect("keygen_vk");
+    plonk::keygen_pk(&PARAMS, vk, &empty).expect("keygen_pk")
+});
 
 // The RDV node's own counter-signature over the certificate's public
 // fields, proving to any later verifier that the node actually agreed to

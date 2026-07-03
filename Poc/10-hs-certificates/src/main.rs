@@ -81,13 +81,43 @@ fn now_unix() -> u64 {
     SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs()
 }
 
-fn hex32(h: &[u8; 32]) -> String {
-    hex::encode(h)
-}
-
 fn parse_hex32(s: &str) -> [u8; 32] {
     let bytes = hex::decode(s).expect("hash must be 64 hex chars");
     bytes.try_into().expect("hash must be exactly 32 bytes")
+}
+
+// One framed JSON message: a type byte that must match `expected`, a 4-byte
+// LE length (capped at MAX_CERT_LEN), then the JSON body. Returns None if the
+// peer hung up or sent a different type; sends MSG_REJECT before returning
+// None when the body is oversized or unparseable.
+fn read_json_frame<T: serde::de::DeserializeOwned>(
+    stream: &mut TcpStream,
+    expected: u8,
+) -> Option<T> {
+    let mut type_buf = [0u8; 1];
+    if !read_exact(stream, &mut type_buf) || type_buf[0] != expected {
+        return None;
+    }
+    let mut len_buf = [0u8; 4];
+    if !read_exact(stream, &mut len_buf) {
+        return None;
+    }
+    let len = u32::from_le_bytes(len_buf) as usize;
+    if len > MAX_CERT_LEN {
+        let _ = stream.write_all(&[MSG_REJECT]);
+        return None;
+    }
+    let mut body = vec![0u8; len];
+    if !read_exact(stream, &mut body) {
+        return None;
+    }
+    match serde_json::from_slice(&body) {
+        Ok(v) => Some(v),
+        Err(_) => {
+            let _ = stream.write_all(&[MSG_REJECT]);
+            None
+        }
+    }
 }
 
 // Node A: candidate rendezvous node. Issues PoW challenges, and grants RDV
@@ -101,7 +131,7 @@ fn run_node_a(port: u16) {
 
 fn run_node_a_with_key(port: u16, sk_a: pallas::Scalar) {
     let node_hash: [u8; 32] = hs_hash(derive_pk(sk_a)).to_repr();
-    println!("[node-a] identity hash: {}", hex32(&node_hash));
+    println!("[node-a] identity hash: {}", hex::encode(node_hash));
 
     let table: RoutingTable = Arc::new(Mutex::new(HashMap::new()));
     let listener = TcpListener::bind(format!("0.0.0.0:{port}")).expect("bind failed");
@@ -156,30 +186,8 @@ fn handle_node_a(
         "[node-a] {peer}: RDV request until {requested_expires}, sent challenge (difficulty {effort})"
     );
 
-    let mut cert_type = [0u8; 1];
-    if !read_exact(stream, &mut cert_type) || cert_type[0] != MSG_CERTIFICATE {
+    let Some(mut cert) = read_json_frame::<Certificate>(stream, MSG_CERTIFICATE) else {
         return;
-    }
-    let mut len_buf = [0u8; 4];
-    if !read_exact(stream, &mut len_buf) {
-        return;
-    }
-    let len = u32::from_le_bytes(len_buf) as usize;
-    if len > MAX_CERT_LEN {
-        println!("[node-a] {peer}: certificate length {len} exceeds cap, rejecting");
-        let _ = stream.write_all(&[MSG_REJECT]);
-        return;
-    }
-    let mut cert_bytes = vec![0u8; len];
-    if !read_exact(stream, &mut cert_bytes) {
-        return;
-    }
-    let mut cert: Certificate = match serde_json::from_slice(&cert_bytes) {
-        Ok(c) => c,
-        Err(_) => {
-            let _ = stream.write_all(&[MSG_REJECT]);
-            return;
-        }
     };
 
     if !accept_certificate(&cert, node_hash, challenge, requested_expires) {
@@ -190,7 +198,7 @@ fn handle_node_a(
 
     println!(
         "[node-a] {peer}: certificate accepted, agreed to route for hs_hash {} until {}",
-        hex32(&cert.hs_hash),
+        hex::encode(cert.hs_hash),
         cert.expires
     );
     // Counter-sign the accepted grant with this node's own identity key
@@ -212,29 +220,8 @@ fn handle_node_a(
     // Node B, now holding confirmation that this node agreed to be its RDV, tells it where to
     // actually route. Signed by the same hidden key, verified with the same
     // circuit. If B closes the connection instead, the grant simply stands without a target yet.
-    let mut route_type = [0u8; 1];
-    if !read_exact(stream, &mut route_type) || route_type[0] != MSG_ROUTE {
+    let Some(instr) = read_json_frame::<RoutingInstruction>(stream, MSG_ROUTE) else {
         return;
-    }
-    let mut len_buf = [0u8; 4];
-    if !read_exact(stream, &mut len_buf) {
-        return;
-    }
-    let len = u32::from_le_bytes(len_buf) as usize;
-    if len > MAX_CERT_LEN {
-        let _ = stream.write_all(&[MSG_REJECT]);
-        return;
-    }
-    let mut instr_bytes = vec![0u8; len];
-    if !read_exact(stream, &mut instr_bytes) {
-        return;
-    }
-    let instr: RoutingInstruction = match serde_json::from_slice(&instr_bytes) {
-        Ok(i) => i,
-        Err(_) => {
-            let _ = stream.write_all(&[MSG_REJECT]);
-            return;
-        }
     };
 
     if accept_instruction(&instr, hs, node_hash) {
@@ -245,7 +232,7 @@ fn handle_node_a(
             entry.route_target = Some(instr.target_node_hash);
             println!(
                 "[node-a] {peer}: routing instruction accepted for hs_hash {} until {} (target kept private)",
-                hex32(&instr.hs_hash),
+                hex::encode(instr.hs_hash),
                 entry.cert.expires
             );
         }
@@ -285,11 +272,7 @@ fn accept_certificate(
         return false;
     }
     if cert.pow_challenge != issued_challenge
-        || !verify_solution(
-            get_challenge_effort(issued_challenge),
-            cert.pow_challenge,
-            cert.pow_solution,
-        )
+        || !verify_solution(cert.pow_challenge, cert.pow_solution)
     {
         return false;
     }
@@ -351,7 +334,7 @@ fn request_rdv(
     println!("[request-rdv] solved, building certificate...");
 
     let sk_b = pallas::Scalar::random(OsRng);
-    let hs_hash_hex = hex32(&hs_hash(derive_pk(sk_b)).to_repr());
+    let hs_hash_hex = hex::encode(hs_hash(derive_pk(sk_b)).to_repr());
     println!("[request-rdv] hidden service hash: {hs_hash_hex}");
 
     let mut cert = build_certificate(sk_b, node_a_hash, expires, challenge, solution);
@@ -392,7 +375,7 @@ fn request_rdv(
             let target = target_hash.unwrap_or_else(|| {
                 hs_hash(derive_pk(pallas::Scalar::random(OsRng))).to_repr()
             });
-            println!("[request-rdv] sending private routing instruction (target: {}...)", &hex32(&target)[..16]);
+            println!("[request-rdv] sending private routing instruction (target: {}...)", &hex::encode(target)[..16]);
             let instr = build_routing_instruction(sk_b, node_a_hash, target);
             let instr_json = serde_json::to_vec(&instr).unwrap();
             stream.write_all(&[MSG_ROUTE]).unwrap();
@@ -433,13 +416,13 @@ fn verify_cert_file(path: &str) {
     let cert: Certificate = serde_json::from_slice(&bytes).expect("invalid certificate JSON");
     let effort = get_challenge_effort(cert.pow_challenge);
     let pow_ok = effort >= MIN_CHALLENGE_DIFFICULTY
-        && verify_solution(effort, cert.pow_challenge, cert.pow_solution);
+        && verify_solution(cert.pow_challenge, cert.pow_solution);
     let expired = cert.expires <= now_unix();
     let proof_ok = verify_certificate(&cert);
     let endorsement_ok = verify_endorsement(&cert);
 
-    println!("hs_hash:        {}", hex32(&cert.hs_hash));
-    println!("rdv_node_hash:  {}", hex32(&cert.rdv_node_hash));
+    println!("hs_hash:        {}", hex::encode(cert.hs_hash));
+    println!("rdv_node_hash:  {}", hex::encode(cert.rdv_node_hash));
     println!("expires:        {} ({})", cert.expires, if expired { "EXPIRED" } else { "not expired" });
     println!("pow effort:     {effort}");
     println!("pow valid:      {pow_ok}");
@@ -464,7 +447,7 @@ fn run_test() {
     // read it off node-a's log. Node A's own privacy guarantees are unaffected either way:
     // the hash is meant to be public, only the underlying key is secret.
     let sk_a = pallas::Scalar::random(OsRng);
-    let node_a_hash = hex32(&hs_hash(derive_pk(sk_a)).to_repr());
+    let node_a_hash = hex::encode(hs_hash(derive_pk(sk_a)).to_repr());
 
     thread::spawn(move || run_node_a_with_key(port_a, sk_a));
     thread::sleep(Duration::from_millis(150));
@@ -620,7 +603,7 @@ mod tests {
         // only the certificate can and should check.
         let effort = get_challenge_effort(cert.pow_challenge);
         assert!(effort >= MIN_CHALLENGE_DIFFICULTY);
-        assert!(verify_solution(effort, cert.pow_challenge, cert.pow_solution));
+        assert!(verify_solution(cert.pow_challenge, cert.pow_solution));
         assert!(cert.expires > now_unix());
         assert!(verify_certificate(&cert));
         assert!(verify_endorsement(&cert));

@@ -61,7 +61,7 @@ impl Circuit<pallas::Base> for CertificateCircuit {
     }
 
     fn configure(meta: &mut ConstraintSystem<pallas::Base>) -> CertificateConfig {
-        let (ecc, lookup_table, _ecc_constants) = configure_ecc(meta);
+        let (ecc, lookup_table) = configure_ecc(meta);
         let (poseidon, poseidon_state) = configure_poseidon(meta);
         let instance = meta.instance_column();
         meta.enable_equality(instance);

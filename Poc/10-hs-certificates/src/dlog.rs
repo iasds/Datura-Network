@@ -8,15 +8,16 @@
 // circuit, and the fixed-base mul pattern Orchard uses for
 // [alpha] SpendAuthG (orchard/src/circuit.rs).
 
+use std::sync::LazyLock;
+
 use ff::PrimeField;
 use group::{Curve, Group};
-use lazy_static::lazy_static;
 use pasta_curves::pallas;
 
 use halo2_gadgets::ecc::{
     chip::{
         find_zs_and_us, BaseFieldElem, EccChip, EccConfig, FixedPoint as FixedPointConstants,
-        FullScalar, ShortScalar, H, NUM_WINDOWS, NUM_WINDOWS_SHORT,
+        FullScalar, ShortScalar, H, NUM_WINDOWS,
     },
     FixedPoint, FixedPoints, ScalarFixed,
 };
@@ -59,30 +60,18 @@ pub(crate) fn load_plain_range_table(
     )
 }
 
-lazy_static! {
-    static ref GENERATOR: pallas::Affine = pallas::Point::generator().to_affine();
-    static ref ZS_AND_US: Vec<(u64, [pallas::Base; H])> =
-        find_zs_and_us(*GENERATOR, NUM_WINDOWS).unwrap();
-    static ref ZS_AND_US_SHORT: Vec<(u64, [pallas::Base; H])> =
-        find_zs_and_us(*GENERATOR, NUM_WINDOWS_SHORT).unwrap();
-}
-
-fn to_u_arrays(zs_and_us: &[(u64, [pallas::Base; H])]) -> Vec<[[u8; 32]; H]> {
-    zs_and_us
-        .iter()
-        .map(|(_, us)| {
-            let mut out = [[0u8; 32]; H];
-            for (dst, u) in out.iter_mut().zip(us.iter()) {
-                *dst = u.to_repr();
-            }
-            out
-        })
-        .collect()
-}
+static GENERATOR: LazyLock<pallas::Affine> =
+    LazyLock::new(|| pallas::Point::generator().to_affine());
+static ZS_AND_US: LazyLock<Vec<(u64, [pallas::Base; H])>> =
+    LazyLock::new(|| find_zs_and_us(*GENERATOR, NUM_WINDOWS).unwrap());
 
 #[derive(Debug, Eq, PartialEq, Clone)]
 pub struct HsGenerator;
 
+// Short and BaseField exist only because the FixedPoints trait demands all
+// three scalar kinds. No circuit in this crate does a short-scalar or
+// base-field fixed-base multiplication, so their constants are stubs; using
+// either gadget would need real precomputed windows here first.
 #[derive(Debug, Eq, PartialEq, Clone)]
 pub struct Short;
 
@@ -95,7 +84,16 @@ impl FixedPointConstants<pallas::Affine> for HsGenerator {
         *GENERATOR
     }
     fn u(&self) -> Vec<[[u8; 32]; H]> {
-        to_u_arrays(&ZS_AND_US)
+        ZS_AND_US
+            .iter()
+            .map(|(_, us)| {
+                let mut out = [[0u8; 32]; H];
+                for (dst, u) in out.iter_mut().zip(us.iter()) {
+                    *dst = u.to_repr();
+                }
+                out
+            })
+            .collect()
     }
     fn z(&self) -> Vec<u64> {
         ZS_AND_US.iter().map(|(z, _)| *z).collect()
@@ -105,26 +103,26 @@ impl FixedPointConstants<pallas::Affine> for HsGenerator {
 impl FixedPointConstants<pallas::Affine> for Short {
     type FixedScalarKind = ShortScalar;
     fn generator(&self) -> pallas::Affine {
-        *GENERATOR
+        unimplemented!("short-scalar fixed-base mul is not used in this crate")
     }
     fn u(&self) -> Vec<[[u8; 32]; H]> {
-        to_u_arrays(&ZS_AND_US_SHORT)
+        unimplemented!("short-scalar fixed-base mul is not used in this crate")
     }
     fn z(&self) -> Vec<u64> {
-        ZS_AND_US_SHORT.iter().map(|(z, _)| *z).collect()
+        unimplemented!("short-scalar fixed-base mul is not used in this crate")
     }
 }
 
 impl FixedPointConstants<pallas::Affine> for BaseField {
     type FixedScalarKind = BaseFieldElem;
     fn generator(&self) -> pallas::Affine {
-        *GENERATOR
+        unimplemented!("base-field fixed-base mul is not used in this crate")
     }
     fn u(&self) -> Vec<[[u8; 32]; H]> {
-        to_u_arrays(&ZS_AND_US)
+        unimplemented!("base-field fixed-base mul is not used in this crate")
     }
     fn z(&self) -> Vec<u64> {
-        ZS_AND_US.iter().map(|(z, _)| *z).collect()
+        unimplemented!("base-field fixed-base mul is not used in this crate")
     }
 }
 
@@ -157,7 +155,7 @@ pub struct DlogConfig {
 // raw lookup_table column too, b/c loading it is our own responsibility.
 pub fn configure_ecc(
     meta: &mut ConstraintSystem<pallas::Base>,
-) -> (HsEccConfig, TableColumn, Column<Fixed>) {
+) -> (HsEccConfig, TableColumn) {
     let advices: [Column<Advice>; 10] = (0..10)
         .map(|_| meta.advice_column())
         .collect::<Vec<_>>()
@@ -174,7 +172,7 @@ pub fn configure_ecc(
 
     let range_check = PallasLookupRangeCheckConfig::configure(meta, advices[9], lookup_table);
     let ecc_config = HsEccChip::configure(meta, advices, lagrange_coeffs, range_check);
-    (ecc_config, lookup_table, constants)
+    (ecc_config, lookup_table)
 }
 
 #[allow(dead_code)]
@@ -193,7 +191,7 @@ impl Circuit<pallas::Base> for DlogCircuit {
     }
 
     fn configure(meta: &mut ConstraintSystem<pallas::Base>) -> DlogConfig {
-        let (ecc, lookup_table, _constants) = configure_ecc(meta);
+        let (ecc, lookup_table) = configure_ecc(meta);
         let instance = meta.instance_column();
         meta.enable_equality(instance);
         DlogConfig {

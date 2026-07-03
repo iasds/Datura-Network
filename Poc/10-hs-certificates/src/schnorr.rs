@@ -98,7 +98,7 @@ impl Circuit<pallas::Base> for SchnorrCircuit {
     }
 
     fn configure(meta: &mut ConstraintSystem<pallas::Base>) -> SchnorrConfig {
-        let (ecc, lookup_table, _ecc_constants) = configure_ecc(meta);
+        let (ecc, lookup_table) = configure_ecc(meta);
 
         let poseidon_state: [Column<Advice>; WIDTH] = (0..WIDTH)
             .map(|_| meta.advice_column())

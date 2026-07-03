@@ -1,4 +1,7 @@
-// Same as the original from POC 11, with same fix added
+// Adapted from PoC 11's equix_pow.rs (including its salt-overflow fix).
+// Diverges from that copy: verify_solution derives the effort from the
+// challenge itself instead of taking it as a parameter, since the effort is
+// packed into the challenge's low 32 bits anyway.
 use equix::*;
 use blake2::{Blake2bVar, digest::{Update, VariableOutput}};
 use std::thread;
@@ -75,19 +78,16 @@ pub fn solve_challenge(num_threads: usize, challenge: u128) -> [u8; 24] {
 
 	// join each handle until one returns a valid value, then return that value
 	for h in handles {
-		let r = h.join().unwrap();
-		if r.is_some() {
-			return r.unwrap();
+		if let Some(solution) = h.join().unwrap() {
+			return solution;
 		}
 	}
 
-	assert!(false);
-	return [0u8; 24];
+	unreachable!("every solver thread exited without a solution");
 }
 
-pub fn verify_solution(effort: u32, challenge: u128, solution: [u8; 24]) -> bool {
-	// extract effort parameter from challenge
-	if get_challenge_effort(challenge) != effort { return false; };
+pub fn verify_solution(challenge: u128, solution: [u8; 24]) -> bool {
+	let effort = get_challenge_effort(challenge);
 
 	let mut seed = [0u8; 40];
 

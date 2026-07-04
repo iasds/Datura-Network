@@ -7,13 +7,9 @@ use crate::{
     client, identity::NodeId, routing::{self, Peer, RoutingTable}, rpc::Message,
 };
 
-/// Kademlia lookup.
-///
-/// Starts from one bootstrap node and walks
-/// the network until no closer peers can be
-/// discovered.
-///
-/// Returns the K closest peers found.
+/// A simple Kademlia implementation, good enough for a PoC, but not production.
+/// Walks the network outward from a bootstrap peer until we have a short list of nodes
+/// that are closest to the requested target.
 pub async fn find_node(
     routing: Arc<Mutex<RoutingTable>>,
     bootstrap: Peer,
@@ -21,10 +17,9 @@ pub async fn find_node(
     k: usize,
 ) -> Vec<Peer> {
 
-    //-------------------------------------------------
-    // known peers
-    //-------------------------------------------------
-
+    // Keep track of every peer we have seen so far, using the node ID as the lookup key.
+    // This lets the search avoid repeatedly asking the same node and makes the nearest-peer
+    // selection deterministic enough to be useful.
     let mut known: HashMap<NodeId, Peer> =
         HashMap::new();
 
@@ -33,28 +28,15 @@ pub async fn find_node(
         bootstrap.clone(),
     );
 
-    //-------------------------------------------------
-    // queried peers
-    //-------------------------------------------------
-
+    // Once a peer has been queried, we do not want to keep hammering it for the same lookup.
     let mut queried =
         HashSet::<NodeId>::new();
 
-    //-------------------------------------------------
-    // previous best distance
-    //-------------------------------------------------
-
     let mut previous_best: Option<[u8;32]> = None;
 
-    //-------------------------------------------------
-    // iterate
-    //-------------------------------------------------
-
     loop {
-
-        //-------------------------------------------------
-        // choose nearest unqueried peer
-        //-------------------------------------------------
+        // Pick the closest peer we have not asked yet. That keeps the search focused on the
+        // part of the network that matters instead of wandering blindly.
 
         let next =
             nearest_unqueried(
@@ -69,10 +51,6 @@ pub async fn find_node(
 
         queried.insert(peer.id);
 
-        //-------------------------------------------------
-        // ask peer
-        //-------------------------------------------------
-
         let reply =
             client::rpc(
                 &mut routing.lock().unwrap(),
@@ -83,19 +61,11 @@ pub async fn find_node(
             )
             .await;
 
-        //-------------------------------------------------
-        // ignore failures
-        //-------------------------------------------------
-
         let Some(
             Message::Nodes { peers }
         ) = reply else {
             continue;
         };
-
-        //-------------------------------------------------
-        // merge
-        //-------------------------------------------------
 
         let mut discovered = false;
 
@@ -119,10 +89,8 @@ pub async fn find_node(
             }
         }
 
-        //-------------------------------------------------
-        // convergence
-        //-------------------------------------------------
-
+        // If the latest round brought in fresh peers, we should keep going; otherwise the
+        // search has likely reached the edge of what this neighborhood can tell us.
         let best =
             known
                 .values()
@@ -163,10 +131,8 @@ pub async fn find_node(
             Some(best_distance);
     }
 
-    //-------------------------------------------------
-    // return K closest
-    //-------------------------------------------------
-
+    // By the time the loop finishes, we have a broad view of the nearby region and can return
+    // the best K candidates.
     let mut peers =
         known
         .into_values()
@@ -192,9 +158,9 @@ pub async fn find_node(
     peers
 }
 
-///
-/// Find nearest peer not already queried.
-///
+/// Chooses the unqueried peer that is currently closest to the target.
+/// This is the small piece of logic used in `find_node` function 
+/// that keeps the lookup converging toward the right part of the network.
 fn nearest_unqueried(
 
     known: &HashMap<NodeId,Peer>,

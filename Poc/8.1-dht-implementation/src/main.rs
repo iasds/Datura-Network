@@ -24,6 +24,7 @@ use records::HSRecord;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // The entrypoint acts as a thin CLI wrapper around the node, bootstrap, and DHT operations.
 
     let first_node_id = [0x13, 0x9e, 0x39, 0x40, 0xe6, 0x4b, 0x54, 0x91, 0x72, 0x20, 0x88, 0xd9, 0xa0, 0xd7, 0x41, 0x62, 0x8f, 0xc8, 0x26, 0xe0, 0x94, 0x75, 0xd3, 0x41, 0xa7, 0x80, 0xac, 0xde, 0x3c, 0x4b, 0x80, 0x70];
     let first_node_addr = "127.0.0.1:9000";
@@ -52,7 +53,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     match mode {
 
-        "init" => { // first node in the network, no bootstrap
+        "init" => { // Start the first node in the network without needing any bootstrap peer.
             let node = Identity::init_with_value(0);
             node.print_info(); // Should print "first_node_id" exactly.
             let me = Peer {
@@ -71,6 +72,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
 
         "node" => {
+            // Regular nodes join an existing network and then start serving requests.
 
             let node = Identity::new();
             node.print_info();
@@ -130,6 +132,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
 
         "publish-nat" => {
+            // Publish a NAT record so other nodes can find the gateway for a peer behind NAT.
 
             let gateway_id_string: String =
                 args.get(2).cloned().unwrap_or(hex::encode(first_node_id));
@@ -190,6 +193,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
 
         "resolve-nat" => {
+            // Look up a previously published NAT record using the DHT.
 
             let node_behind_nat_id_string: String =
                 args.get(2).cloned().unwrap_or(hex::encode(first_node_id));
@@ -233,6 +237,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
 
         "publish-hs" => {
+            // Publish a hidden service descriptor so it can be discovered later by hash.
 
             let bootstrap_id_string: String =
                 args.get(2).cloned().unwrap_or(hex::encode(first_node_id));
@@ -284,6 +289,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
 
         "resolve-hs" => {
+            // Resolve a hidden service descriptor from the DHT.
 
             let hs_id_string: String =
                 args.get(2).cloned().unwrap_or(hex::encode(first_node_id));

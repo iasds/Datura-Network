@@ -4,6 +4,7 @@ use crate::identity::NodeId;
 use crate::records::Record;
 
 
+/// A local store for values that this node holds for the DHT.
 pub struct Storage {
     records: HashMap<[u8;32], Record>,
 }
@@ -11,6 +12,7 @@ pub struct Storage {
 
 impl Storage {
 
+    /// Create an empty store for the node's local DHT records.
     pub fn new() -> Self {
         Self {
             records: HashMap::new()
@@ -18,6 +20,7 @@ impl Storage {
     }
 
 
+    /// Save a record under its key so later lookups can find it without asking the network again.
     pub fn put(
         &mut self,
         key: NodeId,
@@ -30,6 +33,7 @@ impl Storage {
     }
 
 
+    /// Retrieve a record by key (when this node is the one that actually holds it).
     pub fn get(
         &self,
         key: &NodeId,

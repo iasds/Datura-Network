@@ -12,6 +12,8 @@ use crate::{
     lookup,
 };
 
+/// Publishes a NAT record by sending it to XOR closest peers to the owner ID.
+/// This is a best-effort store. We ignore any individual failures in this PoC.
 pub async fn publish_nat_record(
     bootstrap: Peer,
     record: NatRecord,
@@ -26,7 +28,6 @@ pub async fn publish_nat_record(
     ).await;
 
     for peer in close_peers {
-
         let _ =
             client::rpc(
                 &mut routing.lock().unwrap(),
@@ -42,13 +43,15 @@ pub async fn publish_nat_record(
     }
 }
 
+/// Looks up a NAT record by walking the DHT toward the target node ID and asking nearby
+/// peers whether they have a value for that key. As soon as one of them returns a NAT
+/// record, we return the record. If none of them returns a NAT record, we return None.
 pub async fn resolve_nat_record(
     bootstrap: Peer,
     node_id: NodeId,
     routing: Arc<Mutex<RoutingTable>>,
 ) -> Option<NatRecord>
 {
-
     let close_peers = lookup::find_node(
         routing.clone(),
         bootstrap.clone(),
@@ -57,7 +60,6 @@ pub async fn resolve_nat_record(
     ).await;
 
     for peer in close_peers {
-
         if let Some(
             Message::Value {
                 record:
@@ -82,6 +84,8 @@ pub async fn resolve_nat_record(
     None
 }
 
+/// Publishes a hidden service descriptor by storing it on peers that are close
+/// (XOR) to the hidden service hash in the DHT. 
 pub async fn publish_hs_descriptor(
     bootstrap: Peer,
     record: HSRecord,
@@ -96,7 +100,6 @@ pub async fn publish_hs_descriptor(
     ).await;
 
     for peer in close_peers {
-
         let _ =
             client::rpc(
                 &mut routing.lock().unwrap(),
@@ -113,6 +116,8 @@ pub async fn publish_hs_descriptor(
     }
 }
 
+/// Resolves a hidden service descriptor by searching the DHT for the its hash and
+/// checking the nearby peers until one returns a descriptor.
 pub async fn resolve_hs_descriptor(
     bootstrap: Peer,
     hs_hash: NodeId,
@@ -127,7 +132,6 @@ pub async fn resolve_hs_descriptor(
     ).await;
 
     for peer in close_peers {
-
         if let Some(
             Message::Value {
                 record:

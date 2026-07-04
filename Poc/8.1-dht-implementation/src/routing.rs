@@ -5,7 +5,7 @@ use std::{
     net::SocketAddr,
 };
 
-/// Maximum peers per bucket.
+/// A small cap per bucket keeps the routing table from growing into a swamp of stale nodes.
 pub const K: usize = 20;
 
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
@@ -14,6 +14,8 @@ pub struct Peer {
     pub addr: SocketAddr,
 }
 
+/// A bucket holds peers that are roughly the same distance away from a node.
+/// That makes it practical to find nodes that are likely to be useful for a given lookup.
 pub struct KBucket {
     peers: VecDeque<Peer>,
 }
@@ -25,11 +27,6 @@ impl KBucket {
         }
     }
 
-    /// Insert using simple LRU.
-    ///
-    /// Existing peer -> move to back.
-    /// New peer -> append if bucket has room.
-    /// Full bucket -> ignore (PoC simplification).
     pub fn insert(&mut self, peer: Peer) {
 
         if let Some(pos) =
@@ -50,19 +47,16 @@ impl KBucket {
     }
 }
 
+/// The routing table is the node's local map of the network.
 pub struct RoutingTable {
 
-    /// Local node peer.
     local_peer: Peer,
 
-    /// 256 Kademlia buckets. Make it 32 for PoC?
     buckets: Vec<KBucket>,
 }
 
 impl RoutingTable {
 
-    /// initialize local ID to all zeros.
-    /// Later call set_local_peer().
     pub fn new() -> Self {
 
         let mut buckets = Vec::with_capacity(256);
@@ -80,7 +74,8 @@ impl RoutingTable {
         }
     }
 
-    /// Call once after Identity::new().
+    /// Set the node's own identity once the process has a real local peer to represent.
+    /// MUST be called after new()
     pub fn set_local_peer(
         &mut self,
         peer: Peer,
@@ -96,6 +91,7 @@ impl RoutingTable {
             .insert(self.local_peer.clone());
     }
 
+    /// Remember a newly discovered peer by placing it in the bucket that matches its distance.
     pub fn add_peer(
         &mut self,
         peer: Peer,
@@ -161,6 +157,9 @@ impl RoutingTable {
         }
     }
 
+    /// Return the peers that look best for a lookup toward the given target.
+    /// The search expands outward from the most relevant bucket until
+    /// it has enough candidates (set by `count`).
     pub fn closest(
         &self,
         target: NodeId,
@@ -177,9 +176,6 @@ impl RoutingTable {
 
         for radius in 0..256 {
 
-            //--------------------------------------------------
-            // left bucket
-            //--------------------------------------------------
 
             if let Some(index) = center.checked_sub(radius) {
                 self.consider_bucket(
@@ -189,10 +185,6 @@ impl RoutingTable {
                     &mut best,
                 );
             }
-
-            //--------------------------------------------------
-            // right bucket
-            //--------------------------------------------------
 
             if radius != 0 {
 
@@ -214,9 +206,7 @@ impl RoutingTable {
 
 }
 
-/// XOR distance.
-///
-/// Smaller == closer.
+/// XOR distance compares how "close" two node IDs are.
 pub fn xor_distance(
     a: &NodeId,
     b: &NodeId,
@@ -231,11 +221,9 @@ pub fn xor_distance(
     out
 }
 
-/// Determine which bucket a peer belongs in.
-///
-/// bucket 255 = nearest
-///
-/// bucket 0 = farthest
+/// Map a node ID to the bucket that should hold it.
+/// The bucket index reflects how far the a peer is from the local node in XOR space.
+/// 0 means farthest and 255 means the same node (closest possible).
 pub fn bucket_index(
     local: &NodeId,
     remote: &NodeId,

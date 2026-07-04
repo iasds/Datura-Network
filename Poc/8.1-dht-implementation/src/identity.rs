@@ -8,6 +8,8 @@ use hex;
 
 pub type NodeId = [u8; 32];
 
+/// A simple container for a node's identity.
+/// It keeps the private signing key, the public verification key, and the derived node ID together.
 pub struct Identity {
     pub signing_key: SigningKey,
     pub verifying_key: VerifyingKey,
@@ -16,6 +18,7 @@ pub struct Identity {
 
 impl Default for Identity {
     fn default() -> Self {
+        // Create a fresh random seed for the signing key so each node gets its own identity.
         let mut bytes = [0u8; 32];
         OsRng.fill_bytes(&mut bytes);
 
@@ -39,10 +42,13 @@ impl Default for Identity {
 }
 
 impl Identity {
+    /// Create a new identity with randomly generated keys.
     pub fn new() -> Self {
         Self::default()
     }
 
+    /// Build an identity from a deterministic seed value.
+    /// This is handy for tests or for creating predictable identities.
     pub fn init_with_value(value: u8) -> Self {
         let mut bytes = [0u8; 32];
         bytes[0] = value;
@@ -50,6 +56,7 @@ impl Identity {
         let signing_key = SigningKey::from_bytes(&bytes);
         let verifying_key: VerifyingKey = signing_key.verifying_key();
 
+        // The node ID is public key's hash.
         let mut hasher = Sha256::new();
         hasher.update(verifying_key.as_bytes());
 
@@ -65,10 +72,10 @@ impl Identity {
         }
     }
 
+    /// Turn the public key into a .dn address.
     pub fn get_address(&self) -> String {
         let pk = self.verifying_key.to_bytes();
 
-        // checksum = first 2 bytes of SHA3-256(".dn checksum" || pubkey || version)
         let mut hasher = Sha3_256::new();
         hasher.update(b".dn checksum");
         hasher.update(&pk);
@@ -76,16 +83,15 @@ impl Identity {
         let digest = hasher.finalize();
         let checksum = &digest[..2];
 
-        // onion address bytes = pubkey || checksum || version
         let mut onion_bytes = Vec::with_capacity(35);
         onion_bytes.extend_from_slice(&pk);
         onion_bytes.extend_from_slice(checksum);
         onion_bytes.push(0x03);
 
-        // base32 encode → 56 chars
         BASE32_NOPAD.encode(&onion_bytes).to_lowercase()
     }
 
+    /// Print an overview of the identity for debugging or inspection.
     pub fn print_info(&self) {
         println!("Signing Key: {:x?}", self.signing_key.to_bytes());
         println!("Public Key: {:x?}", self.verifying_key.as_bytes());

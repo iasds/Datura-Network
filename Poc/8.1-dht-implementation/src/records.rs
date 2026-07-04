@@ -3,6 +3,7 @@ use serde::{Serialize, Deserialize};
 use crate::identity::NodeId;
 
 
+/// A record for pointing a node behind NAT toward a reachable gateway.
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct NatRecord {
     pub owner: NodeId,
@@ -12,6 +13,7 @@ pub struct NatRecord {
 }
 
 
+/// A descriptor for a hidden service.
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct HSRecord {
     pub hs_hash: NodeId,
@@ -20,6 +22,7 @@ pub struct HSRecord {
 }
 
 
+/// A wrapper NAT and HS records.
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub enum Record {
     Nat(NatRecord),

@@ -7,6 +7,8 @@ use crate::{
 };
 
 
+/// The wire-format for the network.
+/// Each variant is a simple request or response for routing, discovery, or DHT storage.
 #[derive(Serialize, Deserialize, Debug)]
 pub enum Message {
 

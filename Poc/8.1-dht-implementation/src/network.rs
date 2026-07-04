@@ -8,7 +8,7 @@ use crate::{
     identity::NodeId, routing::{Peer, RoutingTable}, rpc::Message, storage::Storage,
 };
 
-
+/// This is the node's network loop: it listens for incoming messages and updates local state.
 pub async fn run_server(
     bind_addr: &str,
     my_id: NodeId,
@@ -28,7 +28,8 @@ pub async fn run_server(
 
     let mut buffer = [0u8; 4096];
 
-
+    // Simple server for PoC: each packet is handled as an isolated request,
+    // and the response is built from whatever local state the node already has.
     loop {
 
         let (size, sender) =
@@ -51,6 +52,7 @@ pub async fn run_server(
             }
 
             Message::Hello { peer } => {
+                // Learning about a new peer is the basic way the network grows.
                 routing.lock().unwrap().add_peer(peer.clone());
 
                 Some(Message::HelloAck {
@@ -59,7 +61,7 @@ pub async fn run_server(
             }
 
             Message::FindNode { target } => {
-
+                // Local routing table lookup.
                 let peers =
                     routing
                         .lock()
@@ -70,14 +72,14 @@ pub async fn run_server(
             }
 
             Message::Store { key, record } => {
-
+                // Storing data.
                 storage.lock().unwrap().put(key, record);
 
                 None
             }
 
             Message::FindValue { key } => {
-
+                // Returns a stored record.
                 let value =
                     storage.lock().unwrap().get(&key).cloned();
 

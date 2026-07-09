@@ -34,14 +34,16 @@ pub struct RoutingInstruction {
 // Node B builds the instruction with the SAME sk that built the certificate;
 // the resulting hs_hash therefore matches the certificate's, which is what
 // lets Node A tie the two together without ever learning the key.
+// Returns None if either hash is not a canonical field element (always the
+// case for real node/target hashes; this only rejects malformed input).
 pub fn build_routing_instruction(
     sk: pallas::Scalar,
     rdv_node_hash: [u8; 32],
     target_node_hash: [u8; 32],
-) -> RoutingInstruction {
+) -> Option<RoutingInstruction> {
     let hs_hash_fp = hs_hash(derive_pk(sk));
-    let rdv_fp = hash_bytes_to_fp(rdv_node_hash);
-    let target_fp = hash_bytes_to_fp(target_node_hash);
+    let rdv_fp = hash_bytes_to_fp(rdv_node_hash)?;
+    let target_fp = hash_bytes_to_fp(target_node_hash)?;
 
     let m = envelope_message(rdv_fp, target_fp, route_domain());
     let k = pallas::Scalar::random(OsRng);
@@ -49,12 +51,12 @@ pub fn build_routing_instruction(
 
     let proof = prove_signed_envelope(sk, r_point, s, [hs_hash_fp, rdv_fp, target_fp, route_domain()]);
 
-    RoutingInstruction {
+    Some(RoutingInstruction {
         hs_hash: hs_hash_fp.to_repr(),
         rdv_node_hash,
         target_node_hash,
         proof,
-    }
+    })
 }
 
 // Proof-only check, mirroring verify_certificate: rebuilds the instance from
@@ -100,7 +102,7 @@ mod tests {
     #[test]
     fn round_trip_valid_instruction_verifies() {
         let sk = pallas::Scalar::random(OsRng);
-        let instr = build_routing_instruction(sk, random_hash(), random_hash());
+        let instr = build_routing_instruction(sk, random_hash(), random_hash()).unwrap();
         assert!(verify_routing_instruction(&instr));
     }
 
@@ -109,7 +111,7 @@ mod tests {
         // The RDV node (or anyone intercepting) redirecting the route to a
         // node of their choosing after signing must break the proof.
         let sk = pallas::Scalar::random(OsRng);
-        let mut instr = build_routing_instruction(sk, random_hash(), random_hash());
+        let mut instr = build_routing_instruction(sk, random_hash(), random_hash()).unwrap();
         instr.target_node_hash = random_hash();
         assert!(!verify_routing_instruction(&instr));
     }
@@ -118,7 +120,7 @@ mod tests {
     fn claimed_hash_not_matching_key_rejected() {
         // Signing an instruction for a hidden service hash you don't control.
         let sk = pallas::Scalar::random(OsRng);
-        let mut instr = build_routing_instruction(sk, random_hash(), random_hash());
+        let mut instr = build_routing_instruction(sk, random_hash(), random_hash()).unwrap();
         instr.hs_hash = random_hash();
         assert!(!verify_routing_instruction(&instr));
     }
@@ -130,7 +132,7 @@ mod tests {
         // certificate's proof as an instruction must fail even when the other three fields are copied over.
         let sk = pallas::Scalar::random(OsRng);
         let rdv = random_hash();
-        let cert = build_certificate(sk, rdv, 1_800_000_000, 42, [7u8; 24]);
+        let cert = build_certificate(sk, rdv, 1_800_000_000 - 86_400, 1_800_000_000, 42, [7u8; 24]).unwrap();
 
         let forged = RoutingInstruction {
             hs_hash: cert.hs_hash,
@@ -148,7 +150,7 @@ mod tests {
         let sk = pallas::Scalar::random(OsRng);
         let rdv = random_hash();
         let target = random_hash();
-        let instr = build_routing_instruction(sk, rdv, target);
+        let instr = build_routing_instruction(sk, rdv, target).unwrap();
 
         // Try to pass the instruction's proof off as a certificate whose expires slot carries the target. 
         // verify_signed_envelope with the certificate-shaped instance must reject: slot 3 differs (u128
@@ -165,6 +167,7 @@ mod tests {
         let forged = Certificate {
             hs_hash: instr.hs_hash,
             rdv_node_hash: rdv,
+            issued_at: 1_800_000_000 - 86_400,
             expires: 1_800_000_000,
             pow_challenge: 42,
             pow_solution: [0u8; 24],

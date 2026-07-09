@@ -36,13 +36,19 @@ const MIN_CHALLENGE_DIFFICULTY: u32 = 800;
 // which is what the expiry mechanism is for.
 const MAX_CERT_LIFETIME_SECS: u64 = 30 * 86_400;
 
+// Tolerance for clock differences between the RDV node and any later verifier when checking a certificate's issued_at.
+const CLOCK_SKEW_SECS: u64 = 300;
+
 // Duration-priced PoW: the challenge difficulty scales with how long a grant
 // Node B is asking to buy, at MIN_CHALLENGE_DIFFICULTY per (started) day.
 // Node B now declares its desired expires inside the RDV request, before the challenge
 // is issued, so Node A can price it.
 fn required_effort(lifetime_secs: u64) -> u32 {
     let days = lifetime_secs.div_ceil(86_400).max(1);
-    (days as u32).saturating_mul(MIN_CHALLENGE_DIFFICULTY)
+    // Saturate in u64 before narrowing: casting days to u32 before the
+    // multiply would wrap an astronomically long lifetime down toward zero
+    // effort instead of saturating.
+    u32::try_from(days.saturating_mul(MIN_CHALLENGE_DIFFICULTY as u64)).unwrap_or(u32::MAX)
 }
 
 // Much more than other poc's 30 secs: unlike simple packet forwarding, the
@@ -83,7 +89,16 @@ fn now_unix() -> u64 {
 
 fn parse_hex32(s: &str) -> [u8; 32] {
     let bytes = hex::decode(s).expect("hash must be 64 hex chars");
-    bytes.try_into().expect("hash must be exactly 32 bytes")
+    let arr: [u8; 32] = bytes.try_into().expect("hash must be exactly 32 bytes");
+    // Every node/HS hash in this system is a Poseidon output, i.e. a canonical
+    // pallas base-field element. Reject anything else here at the untrusted-input
+    // boundary, so a malformed hash can never reach the proving code (where it
+    // would otherwise be a None the builders have to propagate).
+    assert!(
+        bool::from(pallas::Base::from_repr(arr).is_some()),
+        "hash is not a canonical field element"
+    );
+    arr
 }
 
 // One framed JSON message: a type byte that must match `expected`, a 4-byte
@@ -138,9 +153,21 @@ fn run_node_a_with_key(port: u16, sk_a: pallas::Scalar) {
     println!("[node-a:{port}] listening");
 
     for incoming in listener.incoming() {
-        let mut stream = incoming.unwrap();
-        stream.set_read_timeout(Some(IO_TIMEOUT)).unwrap();
-        stream.set_write_timeout(Some(IO_TIMEOUT)).unwrap();
+        // A transient accept error (fd exhaustion under a connection flood, a
+        // peer resetting between accept and return) must not take the whole
+        // node down. Skip the bad connection and keep serving.
+        let mut stream = match incoming {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("[node-a] accept error, skipping: {e}");
+                continue;
+            }
+        };
+        if stream.set_read_timeout(Some(IO_TIMEOUT)).is_err()
+            || stream.set_write_timeout(Some(IO_TIMEOUT)).is_err()
+        {
+            continue;
+        }
         let peer = stream.peer_addr().map(|a| a.to_string()).unwrap_or_default();
         let table = table.clone();
         thread::spawn(move || handle_node_a(&mut stream, &peer, sk_a, node_hash, table));
@@ -271,6 +298,14 @@ fn accept_certificate(
     if cert.expires <= now || cert.expires > now + MAX_CERT_LIFETIME_SECS {
         return false;
     }
+    // issued_at must sit at the present (within skew). This node priced the
+    // challenge for `requested_expires - now`; recording an issued_at far from
+    // now would make the certificate's own window (expires - issued_at) disagree
+    // with what was actually paid, and a later verifier recomputes the
+    // price from that window. Pinning it here keeps the two consistent.
+    if cert.issued_at + CLOCK_SKEW_SECS < now || cert.issued_at > now + CLOCK_SKEW_SECS {
+        return false;
+    }
     if cert.pow_challenge != issued_challenge
         || !verify_solution(cert.pow_challenge, cert.pow_solution)
     {
@@ -337,7 +372,11 @@ fn request_rdv(
     let hs_hash_hex = hex::encode(hs_hash(derive_pk(sk_b)).to_repr());
     println!("[request-rdv] hidden service hash: {hs_hash_hex}");
 
-    let mut cert = build_certificate(sk_b, node_a_hash, expires, challenge, solution);
+    // Record the issue time so a verifier can price the grant's full
+    // window. node_a_hash was validated canonical in parse_hex32, so the build never returns None here.
+    let issued_at = now_unix();
+    let mut cert = build_certificate(sk_b, node_a_hash, issued_at, expires, challenge, solution)
+        .expect("node-a hash validated canonical at parse time");
 
     let cert_json = serde_json::to_vec(&cert).unwrap();
     stream.write_all(&[MSG_CERTIFICATE]).unwrap();
@@ -376,7 +415,8 @@ fn request_rdv(
                 hs_hash(derive_pk(pallas::Scalar::random(OsRng))).to_repr()
             });
             println!("[request-rdv] sending private routing instruction (target: {}...)", &hex::encode(target)[..16]);
-            let instr = build_routing_instruction(sk_b, node_a_hash, target);
+            let instr = build_routing_instruction(sk_b, node_a_hash, target)
+                .expect("hashes validated canonical");
             let instr_json = serde_json::to_vec(&instr).unwrap();
             stream.write_all(&[MSG_ROUTE]).unwrap();
             stream.write_all(&(instr_json.len() as u32).to_le_bytes()).unwrap();
@@ -404,27 +444,36 @@ fn request_rdv(
 // proof-valid answer comes from verify_certificate; the rest would be
 // silently skipped if this printed "proof valid: true" alone.
 
-// A standalone verifier must apply itself: the PoW difficulty is
-// whatever effort value is embedded in pow_challenge. A
-// colluding HS + RDV pair could mint a certificate with a trivial effort,
-// so a verifier that cares about the payment being real must also enforce
-// a minimum acceptable effort (a network-wide constant: at least
-// MIN_CHALLENGE_DIFFICULTY, one day's price. A third party can't recompute
-// the exact duration price without knowing the issue time).
+// A standalone verifier must apply the PoW policy itself: the effort baked into
+// pow_challenge is whatever the prover chose, so a colluding HS + RDV pair could
+// try to mint a long-lived grant while paying for a short one. The certificate
+// carries issued_at (bound into the RDV node's endorsement), so a third
+// party can recompute the exact duration price: required_effort(expires - issued_at). 
+// Because issued_at must be in the past, a far-future expires forces
+// a proportionally large window --> the pair cannot understate what they owe. We
+// still keep the one-day floor for degenerate windows.
 fn verify_cert_file(path: &str) {
     let bytes = std::fs::read(path).expect("failed to read certificate file");
     let cert: Certificate = serde_json::from_slice(&bytes).expect("invalid certificate JSON");
+    let now = now_unix();
     let effort = get_challenge_effort(cert.pow_challenge);
-    let pow_ok = effort >= MIN_CHALLENGE_DIFFICULTY
+    // Price the certificate's own claimed window. issued_at must not be in the
+    // future (a future issue time would shrink the priced window for free).
+    let issued_ok = cert.issued_at <= now + CLOCK_SKEW_SECS;
+    let priced_window = cert.expires.saturating_sub(cert.issued_at);
+    let required = required_effort(priced_window).max(MIN_CHALLENGE_DIFFICULTY);
+    let pow_ok = issued_ok
+        && effort >= required
         && verify_solution(cert.pow_challenge, cert.pow_solution);
-    let expired = cert.expires <= now_unix();
+    let expired = cert.expires <= now;
     let proof_ok = verify_certificate(&cert);
     let endorsement_ok = verify_endorsement(&cert);
 
     println!("hs_hash:        {}", hex::encode(cert.hs_hash));
     println!("rdv_node_hash:  {}", hex::encode(cert.rdv_node_hash));
+    println!("issued_at:      {}", cert.issued_at);
     println!("expires:        {} ({})", cert.expires, if expired { "EXPIRED" } else { "not expired" });
-    println!("pow effort:     {effort}");
+    println!("pow effort:     {effort} (required {required} for a {priced_window}s window)");
     println!("pow valid:      {pow_ok}");
     println!("proof valid:    {proof_ok}");
     println!("endorsement:    {}", if cert.endorsement.is_some() {
@@ -503,13 +552,14 @@ fn main() {
 mod tests {
     use super::*;
 
-    // A one-day grant, priced accordingly (one day = MIN_CHALLENGE_DIFFICULTY).
-    fn setup() -> (pallas::Scalar, [u8; 32], u128, u64) {
+    // A one-day grant, priced accordingly (one day = MIN_CHALLENGE_DIFFICULTY), issued now.
+    fn setup() -> (pallas::Scalar, [u8; 32], u128, u64, u64) {
         let sk_a = pallas::Scalar::random(OsRng);
         let node_hash: [u8; 32] = hs_hash(derive_pk(sk_a)).to_repr();
-        let expires = now_unix() + 86_400;
+        let issued_at = now_unix();
+        let expires = issued_at + 86_400;
         let challenge = create_challenge(required_effort(86_400));
-        (sk_a, node_hash, challenge, expires)
+        (sk_a, node_hash, challenge, issued_at, expires)
     }
 
     #[test]
@@ -523,11 +573,41 @@ mod tests {
     }
 
     #[test]
+    fn required_effort_saturates_instead_of_truncating() {
+        // A lifetime whose day-count is a multiple of 2^32 must not wrap to a tiny effort; it saturates at u32::MAX.
+        let huge = (1u64 << 32) * 86_400;
+        assert_eq!(required_effort(huge), u32::MAX);
+    }
+
+    #[test]
+    fn standalone_rejects_understated_duration_price() {
+        // a grant claiming a long window while paying only one day's PoW. 
+        // With issued_at bound in, the standalone price check required_effort(expires - issued_at) is not met by a one-day
+        // solution, so a verifier rejects it.
+        let sk_b = pallas::Scalar::random(OsRng);
+        let node_hash = hs_hash(derive_pk(pallas::Scalar::random(OsRng))).to_repr();
+        let issued_at = now_unix();
+        let expires = issued_at + 30 * 86_400; // claim a 30-day grant
+        let challenge = create_challenge(required_effort(86_400)); // pay one day
+        let solution = solve_challenge(1, challenge);
+        let cert =
+            build_certificate(sk_b, node_hash, issued_at, expires, challenge, solution).unwrap();
+
+        let effort = get_challenge_effort(cert.pow_challenge);
+        let priced_window = cert.expires.saturating_sub(cert.issued_at);
+        let required = required_effort(priced_window).max(MIN_CHALLENGE_DIFFICULTY);
+        assert!(
+            effort < required,
+            "a one-day payment must not satisfy a 30-day window's price"
+        );
+    }
+
+    #[test]
     fn valid_certificate_accepted() {
-        let (_, node_hash, challenge, expires) = setup();
+        let (_, node_hash, challenge, issued_at, expires) = setup();
         let solution = solve_challenge(1, challenge);
         let sk_b = pallas::Scalar::random(OsRng);
-        let cert = build_certificate(sk_b, node_hash, expires, challenge, solution);
+        let cert = build_certificate(sk_b, node_hash, issued_at, expires, challenge, solution).unwrap();
 
         assert!(accept_certificate(&cert, node_hash, challenge, expires));
     }
@@ -536,7 +616,7 @@ mod tests {
     fn replayed_pow_solution_from_different_challenge_rejected() {
         // A solution that solves some Equi-X challenge, but not
         // the one Node A actually issued this session, must not be reusable.
-        let (_, node_hash, challenge, expires) = setup();
+        let (_, node_hash, challenge, issued_at, expires) = setup();
         let other_challenge = create_challenge(MIN_CHALLENGE_DIFFICULTY);
         let solution_for_other_challenge = solve_challenge(1, other_challenge);
 
@@ -545,30 +625,32 @@ mod tests {
         let cert = build_certificate(
             sk_b,
             node_hash,
+            issued_at,
             expires,
             other_challenge,
             solution_for_other_challenge,
-        );
+        )
+        .unwrap();
 
         assert!(!accept_certificate(&cert, node_hash, challenge, expires));
     }
 
     #[test]
     fn forged_pow_solution_rejected() {
-        let (_, node_hash, challenge, expires) = setup();
+        let (_, node_hash, challenge, issued_at, expires) = setup();
         let sk_b = pallas::Scalar::random(OsRng);
         // Garbage solution bytes, never actually solved.
-        let cert = build_certificate(sk_b, node_hash, expires, challenge, [0u8; 24]);
+        let cert = build_certificate(sk_b, node_hash, issued_at, expires, challenge, [0u8; 24]).unwrap();
 
         assert!(!accept_certificate(&cert, node_hash, challenge, expires));
     }
 
     #[test]
     fn tampered_rdv_node_hash_rejected() {
-        let (_, node_hash, challenge, expires) = setup();
+        let (_, node_hash, challenge, issued_at, expires) = setup();
         let solution = solve_challenge(1, challenge);
         let sk_b = pallas::Scalar::random(OsRng);
-        let mut cert = build_certificate(sk_b, node_hash, expires, challenge, solution);
+        let mut cert = build_certificate(sk_b, node_hash, issued_at, expires, challenge, solution).unwrap();
 
         // A resolver or the RDV node itself tampering with which node the
         // certificate was actually made out to, after the fact.
@@ -582,27 +664,30 @@ mod tests {
         // The challenge was priced for the requested lifetime; a certificate
         // claiming a longer expires than was paid for must be rejected even
         // though everything else about it is valid.
-        let (_, node_hash, challenge, expires) = setup();
+        let (_, node_hash, challenge, issued_at, expires) = setup();
         let solution = solve_challenge(1, challenge);
         let sk_b = pallas::Scalar::random(OsRng);
-        let cert = build_certificate(sk_b, node_hash, expires + 7 * 86_400, challenge, solution);
+        let cert = build_certificate(sk_b, node_hash, issued_at, expires + 7 * 86_400, challenge, solution).unwrap();
 
         assert!(!accept_certificate(&cert, node_hash, challenge, expires));
     }
 
     #[test]
     fn full_certificate_with_endorsement_verifies_standalone() {
-        let (sk_a, node_hash, challenge, expires) = setup();
+        let (sk_a, node_hash, challenge, issued_at, expires) = setup();
         let solution = solve_challenge(1, challenge);
         let sk_b = pallas::Scalar::random(OsRng);
-        let mut cert = build_certificate(sk_b, node_hash, expires, challenge, solution);
+        let mut cert = build_certificate(sk_b, node_hash, issued_at, expires, challenge, solution).unwrap();
         assert!(accept_certificate(&cert, node_hash, challenge, expires));
         cert.endorsement = Some(endorse_certificate(sk_a, &cert));
 
         // Standalone re-verification, what a third party holding
-        // only the certificate can and should check.
+        // only the certificate can and should check. With issued_at bound in,
+        // it recomputes the exact duration price rather than a bare floor.
         let effort = get_challenge_effort(cert.pow_challenge);
-        assert!(effort >= MIN_CHALLENGE_DIFFICULTY);
+        let priced_window = cert.expires.saturating_sub(cert.issued_at);
+        assert!(cert.issued_at <= now_unix() + CLOCK_SKEW_SECS);
+        assert!(effort >= required_effort(priced_window));
         assert!(verify_solution(cert.pow_challenge, cert.pow_solution));
         assert!(cert.expires > now_unix());
         assert!(verify_certificate(&cert));
@@ -616,41 +701,41 @@ mod tests {
 
     #[test]
     fn expired_certificate_rejected() {
-        let (_, node_hash, challenge, _) = setup();
+        let (_, node_hash, challenge, _, _) = setup();
         let solution = solve_challenge(1, challenge);
         let sk_b = pallas::Scalar::random(OsRng);
         // Already-expired timestamp, with the requested expires matching so
         // it's specifically the expiry check that rejects.
         let expired = now_unix() - 3600;
-        let cert = build_certificate(sk_b, node_hash, expired, challenge, solution);
+        let cert = build_certificate(sk_b, node_hash, now_unix(), expired, challenge, solution).unwrap();
 
         assert!(!accept_certificate(&cert, node_hash, challenge, expired));
     }
 
     #[test]
     fn certificate_beyond_max_lifetime_rejected() {
-        let (_, node_hash, challenge, _) = setup();
+        let (_, node_hash, challenge, _, _) = setup();
         let solution = solve_challenge(1, challenge);
         let sk_b = pallas::Scalar::random(OsRng);
         // Even if the request phase were bypassed, the acceptance check
         // itself refuses grants past the cap.
         let too_far = now_unix() + MAX_CERT_LIFETIME_SECS + 3600;
-        let cert = build_certificate(sk_b, node_hash, too_far, challenge, solution);
+        let cert = build_certificate(sk_b, node_hash, now_unix(), too_far, challenge, solution).unwrap();
 
         assert!(!accept_certificate(&cert, node_hash, challenge, too_far));
     }
 
     #[test]
     fn valid_routing_instruction_accepted() {
-        let (_, node_hash, challenge, expires) = setup();
+        let (_, node_hash, challenge, issued_at, expires) = setup();
         let solution = solve_challenge(1, challenge);
         let sk_b = pallas::Scalar::random(OsRng);
-        let cert = build_certificate(sk_b, node_hash, expires, challenge, solution);
+        let cert = build_certificate(sk_b, node_hash, issued_at, expires, challenge, solution).unwrap();
         assert!(accept_certificate(&cert, node_hash, challenge, expires));
 
         // Same sk as the certificate: this is the honest flow.
         let target = hs_hash(derive_pk(pallas::Scalar::random(OsRng))).to_repr();
-        let instr = build_routing_instruction(sk_b, node_hash, target);
+        let instr = build_routing_instruction(sk_b, node_hash, target).unwrap();
         assert!(accept_instruction(&instr, cert.hs_hash, node_hash));
     }
 
@@ -660,14 +745,14 @@ mod tests {
         // attach its own routing instruction to that grant. Its instruction's
         // hs_hash can only ever be its OWN key's hash (the circuit binds
         // them), which won't match the granted H.
-        let (_, node_hash, challenge, expires) = setup();
+        let (_, node_hash, challenge, issued_at, expires) = setup();
         let solution = solve_challenge(1, challenge);
         let sk_b = pallas::Scalar::random(OsRng);
-        let cert = build_certificate(sk_b, node_hash, expires, challenge, solution);
+        let cert = build_certificate(sk_b, node_hash, issued_at, expires, challenge, solution).unwrap();
 
         let sk_attacker = pallas::Scalar::random(OsRng);
         let target = hs_hash(derive_pk(pallas::Scalar::random(OsRng))).to_repr();
-        let instr = build_routing_instruction(sk_attacker, node_hash, target);
+        let instr = build_routing_instruction(sk_attacker, node_hash, target).unwrap();
         assert!(!accept_instruction(&instr, cert.hs_hash, node_hash));
 
         // And simply overwriting the claimed hs_hash breaks the proof.
@@ -680,14 +765,14 @@ mod tests {
     fn routing_instruction_for_wrong_rdv_node_rejected() {
         // An instruction made out to some other RDV node can't be submitted
         // to this one, even by the legitimate HS.
-        let (_, node_hash, challenge, expires) = setup();
+        let (_, node_hash, challenge, issued_at, expires) = setup();
         let solution = solve_challenge(1, challenge);
         let sk_b = pallas::Scalar::random(OsRng);
-        let cert = build_certificate(sk_b, node_hash, expires, challenge, solution);
+        let cert = build_certificate(sk_b, node_hash, issued_at, expires, challenge, solution).unwrap();
 
         let other_node = hs_hash(derive_pk(pallas::Scalar::random(OsRng))).to_repr();
         let target = hs_hash(derive_pk(pallas::Scalar::random(OsRng))).to_repr();
-        let instr = build_routing_instruction(sk_b, other_node, target);
+        let instr = build_routing_instruction(sk_b, other_node, target).unwrap();
         assert!(!accept_instruction(&instr, cert.hs_hash, node_hash));
     }
 }

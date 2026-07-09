@@ -59,6 +59,12 @@ pub struct Endorsement {
 pub struct Certificate {
     pub hs_hash: [u8; 32],
     pub rdv_node_hash: [u8; 32],
+    // When the grant was issued (unix seconds). Together with `expires` this
+    // pins down the paid-for window (expires - issued_at). (What a
+    // standalone verifier recomputes the required PoW effort from) It is bound
+    // into the RDV node's endorsement, so neither Node B nor a relay can restate it 
+    // after the fact without invalidating the endorsement.
+    pub issued_at: u64,
     pub expires: u64,
     pub pow_challenge: u128,
     pub pow_solution: [u8; 24],
@@ -76,10 +82,13 @@ pub(crate) fn u128_to_fp(v: u128) -> pallas::Base {
 
 // Converts an externally-supplied 32-byte hash into an Fp element.
 
-// This only works for hashes that are already valid canonical Fp encodings, not arbitrary SHA-family hashes
-// from the rest of the network's .dn addressing scheme.
-pub(crate) fn hash_bytes_to_fp(bytes: [u8; 32]) -> pallas::Base {
-    pallas::Base::from_repr(bytes).expect("hash bytes must be a canonical Fp encoding")
+// Only canonical Fp encodings are valid (node/HS hashes in this system are
+// Poseidon outputs, i.e. field elements by construction); an arbitrary
+// SHA-family hash from the .dn addressing scheme is not. Returns None rather
+// than panicking, so untrusted input (e.g. a hash typed on the command line)
+// is rejected cleanly instead of aborting the process.
+pub(crate) fn hash_bytes_to_fp(bytes: [u8; 32]) -> Option<pallas::Base> {
+    pallas::Base::from_repr(bytes).into_option()
 }
 
 // Shared prove/verify plumbing over the one circuit this crate has. The
@@ -117,18 +126,21 @@ pub(crate) fn verify_signed_envelope(proof: &[u8], instance: [pallas::Base; 4]) 
 }
 
 // Builds a certificate: Node B (the hidden service destination), w/ sk,
-// authorizes rdv_node_hash to route its traffic until expires, having been
-// paid via the given (already-solved) PoW challenge/solution.
+// authorizes rdv_node_hash to route its traffic from issued_at until expires,
+// having been paid via the given (already-solved) PoW challenge/solution.
+// Returns None if rdv_node_hash is not a canonical field element (it always is
+// for a real node hash; this only guards against malformed/hostile input).
 pub fn build_certificate(
     sk: pallas::Scalar,
     rdv_node_hash: [u8; 32],
+    issued_at: u64,
     expires: u64,
     pow_challenge: u128,
     pow_solution: [u8; 24],
-) -> Certificate {
+) -> Option<Certificate> {
     let pk = derive_pk(sk);
     let hs_hash_fp = hs_hash(pk);
-    let rdv_hash_fp = hash_bytes_to_fp(rdv_node_hash);
+    let rdv_hash_fp = hash_bytes_to_fp(rdv_node_hash)?;
     let expires_fp = pallas::Base::from(expires);
     let challenge_fp = u128_to_fp(pow_challenge);
 
@@ -139,24 +151,29 @@ pub fn build_certificate(
     let instance = [hs_hash_fp, rdv_hash_fp, expires_fp, challenge_fp];
     let proof = prove_signed_envelope(sk, r_point, s, instance);
 
-    Certificate {
+    Some(Certificate {
         hs_hash: hs_hash_fp.to_repr(),
         rdv_node_hash,
+        issued_at,
         expires,
         pow_challenge,
         pow_solution,
         proof,
         endorsement: None,
-    }
+    })
 }
 
+// The digest the RDV node signs to endorse a grant. It binds every field a
+// standalone verifier relies on, INCLUDING issued_at, so the paid-for window
+// (expires - issued_at) can't be restated after the node vouched for it.
 fn endorsement_digest(cert: &Certificate) -> Option<pallas::Base> {
     let hs = pallas::Base::from_repr(cert.hs_hash).into_option()?;
     let rdv = pallas::Base::from_repr(cert.rdv_node_hash).into_option()?;
     Some(
-        PoseidonHash::<_, P128Pow5T3, ConstantLength<4>, 3, 2>::init().hash([
+        PoseidonHash::<_, P128Pow5T3, ConstantLength<5>, 3, 2>::init().hash([
             hs,
             rdv,
+            pallas::Base::from(cert.issued_at),
             pallas::Base::from(cert.expires),
             u128_to_fp(cert.pow_challenge),
         ]),
@@ -236,7 +253,7 @@ mod tests {
     fn round_trip_valid_certificate_verifies() {
         let sk = pallas::Scalar::random(OsRng);
         let rdv_node_hash: [u8; 32] = pallas::Base::random(OsRng).to_repr();
-        let cert = build_certificate(sk, rdv_node_hash, 1_800_000_000, 42, [7u8; 24]);
+        let cert = build_certificate(sk, rdv_node_hash, 1_800_000_000 - 86_400, 1_800_000_000, 42, [7u8; 24]).unwrap();
         assert!(verify_certificate(&cert));
     }
 
@@ -244,7 +261,7 @@ mod tests {
     fn tampered_expires_fails_verification() {
         let sk = pallas::Scalar::random(OsRng);
         let rdv_node_hash: [u8; 32] = pallas::Base::random(OsRng).to_repr();
-        let mut cert = build_certificate(sk, rdv_node_hash, 1_800_000_000, 42, [7u8; 24]);
+        let mut cert = build_certificate(sk, rdv_node_hash, 1_800_000_000 - 86_400, 1_800_000_000, 42, [7u8; 24]).unwrap();
         cert.expires = 9_999_999_999;
         assert!(!verify_certificate(&cert));
     }
@@ -253,7 +270,7 @@ mod tests {
     fn claimed_hash_not_matching_key_fails_verification() {
         let sk = pallas::Scalar::random(OsRng);
         let rdv_node_hash: [u8; 32] = pallas::Base::random(OsRng).to_repr();
-        let mut cert = build_certificate(sk, rdv_node_hash, 1_800_000_000, 42, [7u8; 24]);
+        let mut cert = build_certificate(sk, rdv_node_hash, 1_800_000_000 - 86_400, 1_800_000_000, 42, [7u8; 24]).unwrap();
         cert.hs_hash = pallas::Base::random(OsRng).to_repr();
         assert!(!verify_certificate(&cert));
     }
@@ -265,6 +282,7 @@ mod tests {
         let forged = Certificate {
             hs_hash: pallas::Base::random(OsRng).to_repr(),
             rdv_node_hash: pallas::Base::random(OsRng).to_repr(),
+            issued_at: 1_800_000_000 - 86_400,
             expires: 1_800_000_000,
             pow_challenge: 42,
             pow_solution: [0u8; 24],
@@ -279,7 +297,7 @@ mod tests {
         let sk_b = pallas::Scalar::random(OsRng);
         let sk_a = pallas::Scalar::random(OsRng);
         let node_a_hash: [u8; 32] = hs_hash(derive_pk(sk_a)).to_repr();
-        let mut cert = build_certificate(sk_b, node_a_hash, 1_800_000_000, 42, [7u8; 24]);
+        let mut cert = build_certificate(sk_b, node_a_hash, 1_800_000_000 - 86_400, 1_800_000_000, 42, [7u8; 24]).unwrap();
 
         assert!(!verify_endorsement(&cert)); // not endorsed yet
         cert.endorsement = Some(endorse_certificate(sk_a, &cert));
@@ -294,7 +312,7 @@ mod tests {
         let sk_a = pallas::Scalar::random(OsRng);
         let sk_imposter = pallas::Scalar::random(OsRng);
         let node_a_hash: [u8; 32] = hs_hash(derive_pk(sk_a)).to_repr();
-        let mut cert = build_certificate(sk_b, node_a_hash, 1_800_000_000, 42, [7u8; 24]);
+        let mut cert = build_certificate(sk_b, node_a_hash, 1_800_000_000 - 86_400, 1_800_000_000, 42, [7u8; 24]).unwrap();
 
         cert.endorsement = Some(endorse_certificate(sk_imposter, &cert));
         assert!(!verify_endorsement(&cert));
@@ -307,10 +325,24 @@ mod tests {
         let sk_b = pallas::Scalar::random(OsRng);
         let sk_a = pallas::Scalar::random(OsRng);
         let node_a_hash: [u8; 32] = hs_hash(derive_pk(sk_a)).to_repr();
-        let mut cert = build_certificate(sk_b, node_a_hash, 1_800_000_000, 42, [7u8; 24]);
+        let mut cert = build_certificate(sk_b, node_a_hash, 1_800_000_000 - 86_400, 1_800_000_000, 42, [7u8; 24]).unwrap();
         cert.endorsement = Some(endorse_certificate(sk_a, &cert));
 
         cert.expires = 9_999_999_999;
+        assert!(!verify_endorsement(&cert));
+    }
+
+    #[test]
+    fn endorsement_over_tampered_issued_at_rejected() {
+        // issued_at is bound into the endorsement digest, so restating it (to
+        // understate the paid-for window) invalidates the endorsement.
+        let sk_b = pallas::Scalar::random(OsRng);
+        let sk_a = pallas::Scalar::random(OsRng);
+        let node_a_hash: [u8; 32] = hs_hash(derive_pk(sk_a)).to_repr();
+        let mut cert = build_certificate(sk_b, node_a_hash, 1_800_000_000 - 86_400, 1_800_000_000, 42, [7u8; 24]).unwrap();
+        cert.endorsement = Some(endorse_certificate(sk_a, &cert));
+
+        cert.issued_at = 1_800_000_000 - 1; // claim a 1-second window
         assert!(!verify_endorsement(&cert));
     }
 }

@@ -114,11 +114,12 @@ Public certificate fields:
 ```
 hs_hash        H, the HS's public identifier (Poseidon(pk.x, pk.y))
 rdv_node_hash  N, the authorized relay node
+issued_at      I, when the grant was issued (unix seconds)
 expires        T, authorization deadline (unix seconds)
 pow_challenge  C, the Equi-X challenge Node A issued
 pow_solution   the solution to C
 proof          the halo2 proof over instance (H, N, T, C)
-endorsement    N's counter-signature, attached on acceptance (section 5)
+endorsement    N's counter-signature over (H, N, I, T, C), attached on acceptance (section 5)
 ```
 
 The circuit enforces three constraints over the public instance `(H, N, T, C)`:
@@ -148,10 +149,11 @@ Two checks the proof itself doesn't cover, which a standalone verifier must enfo
 - **Duration pricing.** The HS declares its desired `T` inside the RDV request, and the
   challenge is priced from it: one day's difficulty per started day of requested lifetime,
   linearly (a 30-day grant costs 30× a 1-day grant's work). Acceptance then requires the
-  certificate's `T` to equal exactly what was priced. A third party can't re-derive the full
-  price (the certificate records no issue time), so standalone verifiers enforce only the
-  one-day floor. (Mentioned in `README.md`: an `issued_at` bound into the instance would make the
-  full pricing externally checkable.)
+  certificate's `T` to equal exactly what was priced. The certificate also records `issued_at`
+  (`I`), bound into `N`'s endorsement, so a third party can re-derive the full price
+  `required_effort(T - I)` and reject an under-paid grant; the one-day floor remains only for
+  degenerate windows. Since `I` must not lie in the future, a far-off `T` forces a proportionally
+  large window, so a colluding HS+RDV pair can't buy a long grant at a short grant's price.
 - **Lifetime cap.** Even priced, the issuing node refuses `expires` more than 30 days out;
   renewal-by-expiry is the intended long-term mechanism, not one enormous challenge.
 
@@ -245,6 +247,8 @@ Poseidon(N, T, C)`, runs the halo2 prover to produce `proof`, and sends the `Cer
 **4. Accept.** Node A runs `accept_certificate`, cheap checks first so an unpaid peer can't
 force an expensive proof verification:
 - `T` equals exactly the expiry the challenge was priced for;
+- `I` (issued_at) sits at the present within a small skew, so the certificate's own window
+  (`T - I`) matches what A priced and a later standalone verifier will accept;
 - PoW solution matches the challenge issued this session (replay freshness) at the priced
   effort;
 - `N` equals A's own hash;

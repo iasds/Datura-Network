@@ -1,0 +1,5 @@
+/target
+# the hidden service's own secret key
+hs_identity.txt
+# the public decoy set (8 node ids)
+hs_decoy_set.txt

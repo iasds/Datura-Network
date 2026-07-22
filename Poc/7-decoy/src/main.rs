@@ -77,9 +77,10 @@ fn run_fanout(hs: HiddenService, client_count: usize) -> Result<Demo> {
     drop(report_tx);
 
     // spread 8 dests over 6 routers
+    // uneven on purpose: 8 dests don't divide evenly over 6 routers, so routers 0 and 1 cover 2 dest slots each (0&6, 1&7) while the rest cover 1.
     let mut router_fanout: Vec<Vec<u16>> = vec![Vec::new(); ROUTER_COUNT];
     for (slot, port) in dest_ports.iter().enumerate() { //for 8 nodes: index of node, rand port
-        router_fanout[slot % ROUTER_COUNT].push(*port); // router = slot index modulo the amt of routers (round robin) (slot%6)
+        router_fanout[slot % ROUTER_COUNT].push(*port); // router = slot index modulo the amt of routers (slot%6), not an even split
     }
 
     // bind & spawn 6 routers, each relays 1 pkt per client

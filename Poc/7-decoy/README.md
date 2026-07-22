@@ -10,13 +10,13 @@ The decoy set is just 8 public node addrs (`hs_decoy_set.txt`). real hs plus 7 i
 
 ## topology
 
-18 nodes on localhost, as threads:
+18 nodes on localhost: 6 routers + 8 destinations run as their own threads (14 total), the 4 clients run in main's thread:
 
 ```
 4 clients to 6 routers to 8 destinations (1 real + 7 decoy)
 ```
 
-- clients each seal their own packet to the hs public key and push the same bytes into the router layer. a client only knows the hs pubkey, it never sees the decoy set.
+- clients each seal their own packet to the hs public key and push the same bytes into the router layer, one client after another in main. a client only knows the hs pubkey, it never sees the decoy set.
 - routers are blind relays. They just copy the packet onward.
 - dests each try to open the packet. only the real one succeeds.
 - multiple clients so you can see they all fan out to the same fixed 8.

@@ -16,7 +16,7 @@ const TAG_SIZE: usize = 16; // ChaCha20Poly1305 auth tag
 // (plaintext length would let gpa read payload size despite uniform packet size).
 const INNER_SIZE: usize = PACKET_SIZE - NONCE_END - TAG_SIZE;
 const LEN_PREFIX: usize = 2;
-const MAX_PAYLOAD: usize = INNER_SIZE - LEN_PREFIX;q
+const MAX_PAYLOAD: usize = INNER_SIZE - LEN_PREFIX;
 
 // seal payload to `recipient`. every sealed pkt is the exact same size & don't leak payload length, 8 dest's look identical
 pub fn seal(recipient: &EncapsulationKey, payload: &[u8]) -> Result<Vec<u8>> {

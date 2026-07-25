@@ -1,56 +1,26 @@
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 
-use crate::{
-    identity::NodeId,
-    records::Record,
-    routing::Peer,
-};
-
+use crate::{identity::NodeId, records::Record, routing::Peer};
 
 /// The wire-format for the network.
 /// Each variant is a simple request or response for routing, discovery, or DHT storage.
 #[derive(Serialize, Deserialize, Debug)]
 pub enum Message {
-
     Ping,
 
+    Pong { id: NodeId, peer: Peer },
 
-    Pong {
-        id: NodeId,
-        peer: Peer,
-    },
+    Hello { peer: Peer },
 
-    Hello {
-        peer: Peer,
-    },
+    HelloAck { peer: Peer },
 
-    HelloAck {
-        peer: Peer,
-    },
+    FindNode { target: NodeId },
 
+    Nodes { peers: Vec<Peer> },
 
-    FindNode {
-        target: NodeId,
-    },
+    Store { key: NodeId, record: Record },
 
+    FindValue { key: NodeId },
 
-    Nodes {
-        peers: Vec<Peer>,
-    },
-
-
-    Store {
-        key: NodeId,
-        record: Record,
-    },
-
-
-    FindValue {
-        key: NodeId,
-    },
-
-
-    Value {
-        record: Option<Record>,
-    },
+    Value { record: Option<Record> },
 }

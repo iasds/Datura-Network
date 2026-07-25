@@ -1,72 +1,60 @@
-use std::{
-    sync::{Arc, Mutex},
-};
+use std::sync::{Arc, Mutex};
 
 use tokio::net::UdpSocket;
 
 use crate::{
-    identity::NodeId, routing::{Peer, RoutingTable}, rpc::Message, storage::Storage,
+    identity::NodeId,
+    routing::{Peer, RoutingTable},
+    rpc::Message,
+    storage::Storage,
 };
 
 /// This is the node's network loop: it listens for incoming messages and updates local state.
 pub async fn run_server(
-    bind_addr: &str,
-    my_id: NodeId,
+    bind_address: &str,
+    local_node_id: NodeId,
     routing: Arc<Mutex<RoutingTable>>,
     storage: Arc<Mutex<Storage>>,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    println!("Starting server with ID {:x?}", local_node_id);
 
-    println!("Starting server with ID {:x?}", my_id);
-
-    let socket = UdpSocket::bind(bind_addr).await?;
-    let my_peer = Peer {
-        id: my_id,
-        addr: socket.local_addr()?,
+    let socket = UdpSocket::bind(bind_address).await?;
+    let local_peer = Peer {
+        id: local_node_id,
+        address: socket.local_addr()?,
     };
 
-    println!("Listening on {}", bind_addr);
+    println!("Listening on {}", bind_address);
 
-    let mut buffer = [0u8; 4096];
+    let mut receive_buffer = [0u8; 4096];
 
     // Simple server for PoC: each packet is handled as an isolated request,
     // and the response is built from whatever local state the node already has.
     loop {
+        let (received_size, sender_address) = socket.recv_from(&mut receive_buffer).await?;
 
-        let (size, sender) =
-            socket.recv_from(&mut buffer).await?;
+        let request_message: Message = serde_json::from_slice(&receive_buffer[..received_size])?;
 
-        let msg: Message =
-            serde_json::from_slice(&buffer[..size])?;
+        println!("Received {:x?} from {}", request_message, sender_address);
 
-
-        println!("Received {:x?} from {}", msg, sender);
-
-
-        let reply = match msg {
-
-            Message::Ping => {
-                Some(Message::Pong {
-                    id: my_id,
-                    peer: my_peer.clone(),
-                })
-            }
+        let reply = match request_message {
+            Message::Ping => Some(Message::Pong {
+                id: local_node_id,
+                peer: local_peer.clone(),
+            }),
 
             Message::Hello { peer } => {
                 // Learning about a new peer is the basic way the network grows.
                 routing.lock().unwrap().add_peer(peer.clone());
 
                 Some(Message::HelloAck {
-                    peer: my_peer.clone(),
+                    peer: local_peer.clone(),
                 })
             }
 
             Message::FindNode { target } => {
                 // Local routing table lookup.
-                let peers =
-                    routing
-                        .lock()
-                        .unwrap()
-                        .closest(target, 16);
+                let peers = routing.lock().unwrap().closest(target, 16);
 
                 Some(Message::Nodes { peers })
             }
@@ -80,8 +68,7 @@ pub async fn run_server(
 
             Message::FindValue { key } => {
                 // Returns a stored record.
-                let value =
-                    storage.lock().unwrap().get(&key).cloned();
+                let value = storage.lock().unwrap().get(&key).cloned();
 
                 Some(Message::Value { record: value })
             }
@@ -89,18 +76,10 @@ pub async fn run_server(
             _ => None,
         };
 
-
         if let Some(reply) = reply {
+            let reply_bytes = serde_json::to_vec(&reply)?;
 
-            let bytes =
-                serde_json::to_vec(&reply)?;
-
-            socket
-                .send_to(
-                    &bytes,
-                    sender,
-                )
-                .await?;
+            socket.send_to(&reply_bytes, sender_address).await?;
         }
     }
 }

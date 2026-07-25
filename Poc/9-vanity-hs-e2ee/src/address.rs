@@ -12,12 +12,12 @@ const CHECKSUM_PREFIX: &[u8] = b".dn checksum";
 
 // Produces a 56-character label, which is the same length as Tor v3 .onion addresses.
 // The pubkey is fully recoverable from the address with no network lookup.
-pub fn pubkey_to_address(vk: &VerifyingKey) -> String {
-    let pk = vk.as_bytes();
-    let checksum = compute_checksum(pk);
+pub fn pubkey_to_address(verifying_key: &VerifyingKey) -> String {
+    let public_key_bytes = verifying_key.as_bytes();
+    let checksum = compute_checksum(public_key_bytes);
 
     let mut payload = [0u8; 35];
-    payload[..32].copy_from_slice(pk);
+    payload[..32].copy_from_slice(public_key_bytes);
     payload[32..34].copy_from_slice(&checksum);
     payload[34] = VERSION;
 
@@ -62,11 +62,11 @@ pub fn address_to_pubkey(address: &str) -> Result<VerifyingKey, String> {
 }
 
 fn compute_checksum(pubkey_bytes: &[u8; 32]) -> [u8; 2] {
-    let mut h = Sha3_256::new();
-    h.update(CHECKSUM_PREFIX);
-    h.update(pubkey_bytes);
-    h.update([VERSION]);
-    let hash = h.finalize();
+    let mut hasher = Sha3_256::new();
+    hasher.update(CHECKSUM_PREFIX);
+    hasher.update(pubkey_bytes);
+    hasher.update([VERSION]);
+    let hash = hasher.finalize();
     [hash[0], hash[1]]
 }
 
@@ -78,57 +78,57 @@ mod tests {
 
     #[test]
     fn roundtrip() {
-        let sk = SigningKey::generate(&mut OsRng);
-        let vk = sk.verifying_key();
-        let addr = pubkey_to_address(&vk);
+        let signing_key = SigningKey::generate(&mut OsRng);
+        let verifying_key = signing_key.verifying_key();
+        let addr = pubkey_to_address(&verifying_key);
 
         assert!(addr.ends_with(".dn"), "address must end in .dn");
         assert_eq!(addr.len(), 59, "56 chars + 3 for '.dn'");
 
         let recovered = address_to_pubkey(&addr).expect("roundtrip failed");
-        assert_eq!(vk.as_bytes(), recovered.as_bytes());
+        assert_eq!(verifying_key.as_bytes(), recovered.as_bytes());
     }
 
     #[test]
     fn rejects_bad_checksum() {
-        let sk = SigningKey::generate(&mut OsRng);
-        let vk = sk.verifying_key();
-        let mut addr = pubkey_to_address(&vk);
+        let signing_key = SigningKey::generate(&mut OsRng);
+        let verifying_key = signing_key.verifying_key();
+        let mut addr = pubkey_to_address(&verifying_key);
         // Flip the last character before ".dn"
-        let idx = addr.len() - 4;
-        let ch = addr.chars().nth(idx).unwrap();
-        let bad = if ch == 'a' { 'b' } else { 'a' };
-        addr.replace_range(idx..=idx, &bad.to_string());
+        let flip_idx = addr.len() - 4;
+        let original_char = addr.chars().nth(flip_idx).unwrap();
+        let flipped_char = if original_char == 'a' { 'b' } else { 'a' };
+        addr.replace_range(flip_idx..=flip_idx, &flipped_char.to_string());
 
         assert!(address_to_pubkey(&addr).is_err());
     }
 
     #[test]
     fn accepts_uppercase_suffix() {
-        let sk = SigningKey::generate(&mut OsRng);
-        let vk = sk.verifying_key();
-        let addr = pubkey_to_address(&vk);
+        let signing_key = SigningKey::generate(&mut OsRng);
+        let verifying_key = signing_key.verifying_key();
+        let addr = pubkey_to_address(&verifying_key);
         // Replace ".dn" with ".DN": should still parse correctly.
         let upper = format!("{}DN", &addr[..addr.len() - 2]);
         let recovered = address_to_pubkey(&upper).expect("uppercase .DN should be accepted");
-        assert_eq!(vk.as_bytes(), recovered.as_bytes());
+        assert_eq!(verifying_key.as_bytes(), recovered.as_bytes());
     }
 
     #[test]
     fn accepts_whitespace_padding() {
-        let sk = SigningKey::generate(&mut OsRng);
-        let vk = sk.verifying_key();
-        let addr = pubkey_to_address(&vk);
+        let signing_key = SigningKey::generate(&mut OsRng);
+        let verifying_key = signing_key.verifying_key();
+        let addr = pubkey_to_address(&verifying_key);
         let padded = format!("  {addr}  ");
         let recovered = address_to_pubkey(&padded).expect("whitespace-padded address should parse");
-        assert_eq!(vk.as_bytes(), recovered.as_bytes());
+        assert_eq!(verifying_key.as_bytes(), recovered.as_bytes());
     }
 
     #[test]
     fn rejects_wrong_suffix() {
-        let sk = SigningKey::generate(&mut OsRng);
-        let vk = sk.verifying_key();
-        let addr = pubkey_to_address(&vk);
+        let signing_key = SigningKey::generate(&mut OsRng);
+        let verifying_key = signing_key.verifying_key();
+        let addr = pubkey_to_address(&verifying_key);
         let onion = addr.replace(".dn", ".onion");
         assert!(address_to_pubkey(&onion).is_err());
     }

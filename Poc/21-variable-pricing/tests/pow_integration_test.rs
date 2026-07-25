@@ -16,7 +16,6 @@ fn test_pow_verification_mock() {
             client_id: 1,
             nonce,
             timestamp: 1000,
-            difficulty_target: 1,
         };
 
         if verifier.verify(&solution) {
@@ -27,12 +26,15 @@ fn test_pow_verification_mock() {
     }
 
     // At difficulty 1, about half should be valid (128 out of 256)
-    assert!(valid_count > 100 && valid_count < 150, "Should have ~128 valid solutions");
+    assert!(
+        valid_count > 100 && valid_count < 150,
+        "Should have ~128 valid solutions"
+    );
     assert!(invalid_count > 100, "Should have ~128 invalid solutions");
-    }
+}
 
-    #[test]
-    fn test_single_client_pow_generation() {
+#[test]
+fn test_single_client_pow_generation() {
     // Test a single client generating PoW solutions
     let mut rng = rand::thread_rng();
     let mut client = PowClient::new(1);
@@ -42,7 +44,10 @@ fn test_pow_verification_mock() {
     let solutions = client.generate_solutions(100000, difficulty, &mut rng);
 
     // Should have generated some solutions
-    assert!(!solutions.is_empty(), "Client should generate some valid solutions");
+    assert!(
+        !solutions.is_empty(),
+        "Client should generate some valid solutions"
+    );
 
     // All solutions should have correct client_id
     assert!(solutions.iter().all(|s| s.client_id == 1));
@@ -52,24 +57,21 @@ fn test_pow_verification_mock() {
     assert!(solutions.iter().all(|s| verifier.verify(s)));
 
     // Total work should be sum of capped nonces
-    let expected_work: u64 = solutions.iter()
+    let expected_work: u64 = solutions
+        .iter()
         .map(|s| s.nonce % 1_000_000_000)
         .fold(0u64, |acc, x| acc.saturating_add(x));
     assert_eq!(client.total_work, expected_work);
-    }
+}
 
-    #[test]
-    fn test_multiple_clients_pow_competition() {
+#[test]
+fn test_multiple_clients_pow_competition() {
     // Test multiple clients competing to solve PoW
     let mut rng = rand::thread_rng();
     let difficulty = 3u32; // Require 3+ leading zero bits
     let verifier = PowVerifier::new(difficulty);
 
-    let mut clients = vec![
-        PowClient::new(1),
-        PowClient::new(2),
-        PowClient::new(3),
-    ];
+    let mut clients = vec![PowClient::new(1), PowClient::new(2), PowClient::new(3)];
 
     // All clients attempt to generate solutions
     let mut all_solutions = Vec::new();
@@ -91,10 +93,10 @@ fn test_pow_verification_mock() {
         clients[1].solutions.len(),
         clients[2].solutions.len()
     );
-    }
+}
 
-    #[test]
-    fn test_pow_contribution_tracking() {
+#[test]
+fn test_pow_contribution_tracking() {
     // Test that PoW work is correctly tracked as contribution
     let mut rng = rand::thread_rng();
     let mut client = PowClient::new(1);
@@ -104,7 +106,8 @@ fn test_pow_verification_mock() {
     let solutions = client.generate_solutions(100000, difficulty, &mut rng);
 
     // Contribution should be tracked (using same capping as client)
-    let expected_contribution: u64 = solutions.iter()
+    let expected_contribution: u64 = solutions
+        .iter()
         .map(|s| s.nonce % 1_000_000_000)
         .fold(0u64, |acc, x| acc.saturating_add(x));
     assert_eq!(client.total_work, expected_contribution);
@@ -112,10 +115,10 @@ fn test_pow_verification_mock() {
     // Should have some meaningful contribution
     assert!(client.total_work > 0);
     assert!(!client.solutions.is_empty());
-    }
+}
 
-    #[test]
-    fn test_pow_difficulty_scaling() {
+#[test]
+fn test_pow_difficulty_scaling() {
     // Test PoW generation with different difficulty levels
     let mut rng = rand::thread_rng();
 
@@ -127,12 +130,19 @@ fn test_pow_verification_mock() {
         let mut client = PowClient::new(1);
         let solutions = client.generate_solutions(attempts, difficulty, &mut rng);
 
-        println!("Difficulty {} leading zeros: {} solutions", difficulty, solutions.len());
+        println!(
+            "Difficulty {} leading zeros: {} solutions",
+            difficulty,
+            solutions.len()
+        );
 
         // Higher difficulty should result in fewer solutions
-        assert!(solutions.len() < prev_solutions,
-                "Higher difficulty should yield fewer solutions: {} vs {}",
-                solutions.len(), prev_solutions);
+        assert!(
+            solutions.len() < prev_solutions,
+            "Higher difficulty should yield fewer solutions: {} vs {}",
+            solutions.len(),
+            prev_solutions
+        );
         prev_solutions = solutions.len();
 
         // All solutions should be valid
@@ -141,10 +151,10 @@ fn test_pow_verification_mock() {
             assert!(verifier.verify(solution));
         }
     }
-    }
+}
 
-    #[test]
-    fn test_pow_epoch_based_accumulation() {
+#[test]
+fn test_pow_epoch_based_accumulation() {
     // Test that clients accumulate work across multiple epochs
     let mut rng = rand::thread_rng();
     let difficulty = 2u32; // 2+ leading zero bits
@@ -154,7 +164,8 @@ fn test_pow_verification_mock() {
     let mut total_work_accumulated = 0u64;
     for epoch in 1..=3 {
         let solutions = client.generate_solutions(200000, difficulty, &mut rng);
-        let epoch_work: u64 = solutions.iter()
+        let epoch_work: u64 = solutions
+            .iter()
             .map(|s| s.nonce % 1_000_000_000)
             .fold(0u64, |acc, x| acc.saturating_add(x));
         total_work_accumulated = total_work_accumulated.saturating_add(epoch_work);
@@ -172,10 +183,10 @@ fn test_pow_verification_mock() {
 
     // Total should have meaningful contribution
     assert!(client.total_work > 0);
-    }
+}
 
-    #[test]
-    fn test_pow_multiepoch_qualification() {
+#[test]
+fn test_pow_multiepoch_qualification() {
     // Test clients reaching MIN_CONTRIBUTION_THRESHOLD through multiple epochs
     use variable_pricing::consts::MIN_CONTRIBUTION_THRESHOLD;
 
@@ -187,7 +198,8 @@ fn test_pow_verification_mock() {
     let mut epochs = 0;
     while client.total_work < (MIN_CONTRIBUTION_THRESHOLD / 100) && epochs < 100 {
         let solutions = client.generate_solutions(500000, difficulty, &mut rng);
-        let epoch_work: u64 = solutions.iter()
+        let epoch_work: u64 = solutions
+            .iter()
             .map(|s| s.nonce % 1_000_000_000)
             .fold(0u64, |acc, x| acc.saturating_add(x));
         epochs += 1;
@@ -208,10 +220,10 @@ fn test_pow_verification_mock() {
         client.total_work,
         MIN_CONTRIBUTION_THRESHOLD / 100
     );
-    }
+}
 
-    #[test]
-    fn test_pow_solution_batching() {
+#[test]
+fn test_pow_solution_batching() {
     // Test collecting and processing solutions in batches
     let mut rng = rand::thread_rng();
     let difficulty = 5; // 5+ leading bits
@@ -243,10 +255,10 @@ fn test_pow_verification_mock() {
         batch_solutions.len(),
         total_solutions
     );
-    }
+}
 
-    #[test]
-    fn test_pow_with_resource_manager_integration() {
+#[test]
+fn test_pow_with_resource_manager_integration() {
     // Integration test: PoW generation → contribution → allocation
     use variable_pricing::consts::MIN_CONTRIBUTION_THRESHOLD;
 
@@ -280,10 +292,10 @@ fn test_pow_verification_mock() {
         contribution >= target_contribution,
         "PoW work should reach qualification threshold"
     );
-    }
+}
 
-    #[test]
-    fn test_pow_fairness_with_equal_resources() {
+#[test]
+fn test_pow_fairness_with_equal_resources() {
     // Test that clients with equal computational resources generate similar work
     let mut rng1 = rand::thread_rng();
     let mut rng2 = rand::thread_rng();
@@ -302,18 +314,26 @@ fn test_pow_verification_mock() {
     let work_ratio = (client1.total_work as f64) / (client2.total_work as f64);
 
     println!("Work ratio: {:.2}", work_ratio);
-    println!("Client 1: {} work in {} solutions", client1.total_work, client1.solutions.len());
-    println!("Client 2: {} work in {} solutions", client2.total_work, client2.solutions.len());
+    println!(
+        "Client 1: {} work in {} solutions",
+        client1.total_work,
+        client1.solutions.len()
+    );
+    println!(
+        "Client 2: {} work in {} solutions",
+        client2.total_work,
+        client2.solutions.len()
+    );
 
     // Ratio should be reasonably close (0.5 to 2.0)
     assert!(
         work_ratio.is_finite() && work_ratio > 0.5 && work_ratio < 2.0,
         "Similar resources should generate similar work"
     );
-    }
+}
 
-    #[test]
-    fn test_pow_solution_timestamp_tracking() {
+#[test]
+fn test_pow_solution_timestamp_tracking() {
     // Test that solutions properly track timestamps
     let mut rng = rand::thread_rng();
     let mut client = PowClient::new(1);
@@ -334,7 +354,7 @@ fn test_pow_verification_mock() {
         assert!(solution.timestamp >= start_time);
         assert!(solution.timestamp <= end_time + 1); // Allow 1 second buffer
     }
-    }
+}
 
 // ============================================================================
 // ADVERSARIAL SCENARIO TESTS
@@ -344,34 +364,40 @@ fn test_pow_verification_mock() {
 fn test_botnet_attack_many_weak_clients() {
     // Simulate a botnet: 100 weak clients with minimal contribution
     // Tests that many weak clients can't dominate the resource pool individually
-    use variable_pricing::resource_manager::{ResourceManager, Consumer};
+    use variable_pricing::resource_manager::{Consumer, ResourceManager};
 
     let mut rng = rand::thread_rng();
     let difficulty = 2u32;
-    let num_botnet_clients = 100; // Reduced to 100 for realistic simulation
+    let botnet_client_count = 100; // Reduced to 100 for realistic simulation
 
     // Each botnet client does minimal work
     let per_client_attempts = 10000;
 
     let mut botnet_clients = Vec::new();
-    for i in 0..num_botnet_clients {
+    for i in 0..botnet_client_count {
         let mut client = PowClient::new(i as u64);
         client.generate_solutions(per_client_attempts, difficulty, &mut rng);
         botnet_clients.push(client);
     }
 
     let total_botnet_work: u64 = botnet_clients.iter().map(|c| c.total_work).sum();
-    println!("Botnet: {} clients, {} total work", num_botnet_clients, total_botnet_work);
+    println!(
+        "Botnet: {} clients, {} total work",
+        botnet_client_count, total_botnet_work
+    );
 
     // Each botnet client should have non-zero work
-    assert!(botnet_clients.iter().all(|c| c.total_work > 0), "Botnet clients should have work");
+    assert!(
+        botnet_clients.iter().all(|c| c.total_work > 0),
+        "Botnet clients should have work"
+    );
 
     // Now allocate with one strong legitimate client
     let mut legitimate = PowClient::new(9999);
     legitimate.generate_solutions(500000, difficulty, &mut rng);
 
     let capacity = 1000.0;
-    let mut rm = ResourceManager::new(capacity);
+    let mut manager = ResourceManager::new(capacity);
 
     let mut all_clients = Vec::new();
     for botnet_client in &botnet_clients {
@@ -379,31 +405,36 @@ fn test_botnet_attack_many_weak_clients() {
     }
     all_clients.push(Consumer::new(legitimate.id, legitimate.total_work, 5));
 
-    let allocated = rm.allocate(all_clients);
+    let allocated = manager.allocate(all_clients);
 
-    let legit_alloc = allocated.iter()
+    let legitimate_allocation = allocated
+        .iter()
         .find(|c| c.id == legitimate.id)
         .unwrap()
         .allocation;
 
-    let botnet_total: f64 = allocated.iter()
+    let botnet_total: f64 = allocated
+        .iter()
         .filter(|c| c.id < 100)
         .map(|c| c.allocation)
         .sum();
 
     println!("Botnet total allocation: {:.2}", botnet_total);
-    println!("Legitimate allocation: {:.2}", legit_alloc);
+    println!("Legitimate allocation: {:.2}", legitimate_allocation);
 
     // Legitimate client with tenure should get significant share despite botnet
-    assert!(legit_alloc > capacity * 0.2, "Legitimate should get >20% despite botnet");
+    assert!(
+        legitimate_allocation > capacity * 0.2,
+        "Legitimate should get >20% despite botnet"
+    );
 }
 
 #[test]
 fn test_monopoly_prevention_single_whale() {
     // Simulate a single powerful client trying to monopolize
     // This client has 100x+ the work of legitimate clients
-    use variable_pricing::resource_manager::ResourceManager;
     use variable_pricing::resource_manager::Consumer;
+    use variable_pricing::resource_manager::ResourceManager;
 
     let mut rng = rand::thread_rng();
     let difficulty = 1u32; // Easy difficulty for whale to mine lots
@@ -414,43 +445,67 @@ fn test_monopoly_prevention_single_whale() {
     whale.generate_solutions(whale_attempts, difficulty, &mut rng);
 
     // Legitimate clients
-    let mut legit1 = PowClient::new(1);
-    legit1.generate_solutions(100000, difficulty, &mut rng);
+    let mut legitimate1 = PowClient::new(1);
+    legitimate1.generate_solutions(100000, difficulty, &mut rng);
 
-    let mut legit2 = PowClient::new(2);
-    legit2.generate_solutions(100000, difficulty, &mut rng);
+    let mut legitimate2 = PowClient::new(2);
+    legitimate2.generate_solutions(100000, difficulty, &mut rng);
 
     println!("Whale work: {}", whale.total_work);
-    println!("Legit1 work: {}", legit1.total_work);
-    println!("Legit2 work: {}", legit2.total_work);
+    println!("Legitimate1 work: {}", legitimate1.total_work);
+    println!("Legitimate2 work: {}", legitimate2.total_work);
 
     // Create ResourceManager and allocate
     let capacity = 1000.0;
-    let mut rm = ResourceManager::new(capacity);
+    let mut manager = ResourceManager::new(capacity);
 
     let clients = vec![
         Consumer::new(whale.id, whale.total_work, 10),
-        Consumer::new(legit1.id, legit1.total_work, 5),
-        Consumer::new(legit2.id, legit2.total_work, 3),
+        Consumer::new(legitimate1.id, legitimate1.total_work, 5),
+        Consumer::new(legitimate2.id, legitimate2.total_work, 3),
     ];
 
-    let allocated = rm.allocate(clients);
+    let allocated = manager.allocate(clients);
 
     // Whale should NOT get the entire pool despite huge contribution
-    let whale_alloc = allocated.iter().find(|c| c.id == whale.id).unwrap().allocation;
-    let legit1_alloc = allocated.iter().find(|c| c.id == legit1.id).unwrap().allocation;
-    let legit2_alloc = allocated.iter().find(|c| c.id == legit2.id).unwrap().allocation;
+    let whale_allocation = allocated
+        .iter()
+        .find(|c| c.id == whale.id)
+        .unwrap()
+        .allocation;
+    let legitimate1_allocation = allocated
+        .iter()
+        .find(|c| c.id == legitimate1.id)
+        .unwrap()
+        .allocation;
+    let legitimate2_allocation = allocated
+        .iter()
+        .find(|c| c.id == legitimate2.id)
+        .unwrap()
+        .allocation;
 
     // Monopoly prevention: no single client should get > 25% in normal cases
     // But verify that legitimate clients still get significant allocation
-    println!("Allocations: whale={:.2}, legit1={:.2}, legit2={:.2}", whale_alloc, legit1_alloc, legit2_alloc);
+    println!(
+        "Allocations: whale={:.2}, legitimate1={:.2}, legitimate2={:.2}",
+        whale_allocation, legitimate1_allocation, legitimate2_allocation
+    );
 
-    assert!(legit1_alloc > 0.0, "Legitimate client 1 should get allocation");
-    assert!(legit2_alloc > 0.0, "Legitimate client 2 should get allocation");
+    assert!(
+        legitimate1_allocation > 0.0,
+        "Legitimate client 1 should get allocation"
+    );
+    assert!(
+        legitimate2_allocation > 0.0,
+        "Legitimate client 2 should get allocation"
+    );
 
     // Legitimate clients combined should get meaningful fraction
-    let legit_combined = legit1_alloc + legit2_alloc;
-    assert!(legit_combined > capacity * 0.1, "Legitimate clients should get >10% combined");
+    let legitimate_combined = legitimate1_allocation + legitimate2_allocation;
+    assert!(
+        legitimate_combined > capacity * 0.1,
+        "Legitimate clients should get >10% combined"
+    );
 }
 
 #[test]
@@ -458,19 +513,19 @@ fn test_sybil_attack_many_minimum_clients() {
     // Simulate Sybil attack: many clients with JUST enough contribution to qualify
     // Tests if MIN_CONTRIBUTION_THRESHOLD effectively prevents Sybil attacks
     use variable_pricing::consts::MIN_CONTRIBUTION_THRESHOLD;
-    use variable_pricing::resource_manager::ResourceManager;
     use variable_pricing::resource_manager::Consumer;
+    use variable_pricing::resource_manager::ResourceManager;
 
     let mut rng = rand::thread_rng();
     let difficulty = 1u32; // Easy mining
 
     // Create 50 "Sybil" clients, each with exactly MIN_CONTRIBUTION_THRESHOLD
-    let num_sybils = 50;
+    let sybil_count = 50;
     let threshold = MIN_CONTRIBUTION_THRESHOLD;
 
     let mut sybil_clients = Vec::new();
 
-    for i in 0..num_sybils {
+    for i in 0..sybil_count {
         let mut client = PowClient::new(i as u64);
         // Generate enough work to reach threshold
         let mut attempts = 0;
@@ -481,40 +536,46 @@ fn test_sybil_attack_many_minimum_clients() {
         sybil_clients.push(client);
     }
 
-    println!("Sybil attack: {} clients at threshold", num_sybils);
+    println!("Sybil attack: {} clients at threshold", sybil_count);
 
     // All should be at or above threshold
-    let qualified = sybil_clients.iter().filter(|c| c.total_work >= threshold).count();
-    println!("Qualified sybils: {}/{}", qualified, num_sybils);
+    let qualified = sybil_clients
+        .iter()
+        .filter(|c| c.total_work >= threshold)
+        .count();
+    println!("Qualified sybils: {}/{}", qualified, sybil_count);
     assert!(qualified > 0, "Should have some qualified sybils");
 
     // Now allocate resources
     let capacity = 1000.0;
-    let mut rm = ResourceManager::new(capacity);
+    let mut manager = ResourceManager::new(capacity);
 
     let consumers: Vec<Consumer> = sybil_clients
         .iter()
         .map(|c| Consumer::new(c.id, c.total_work, 1))
         .collect();
 
-    let allocated = rm.allocate(consumers);
+    let allocated = manager.allocate(consumers);
 
     // Total allocation should not exceed capacity
-    let total_alloc: f64 = allocated.iter().map(|c| c.allocation).sum();
-    assert!(total_alloc <= capacity * 1.001);
+    let total_allocation: f64 = allocated.iter().map(|c| c.allocation).sum();
+    assert!(total_allocation <= capacity * 1.001);
 
     // Even with many minimum clients, distribution should be reasonable
-    let avg_alloc = total_alloc / (allocated.len() as f64);
-    println!("Average allocation per sybil: {:.4}", avg_alloc);
-    assert!(avg_alloc > 0.0, "Even sybils should get minimum allocation");
+    let average_allocation = total_allocation / (allocated.len() as f64);
+    println!("Average allocation per sybil: {:.4}", average_allocation);
+    assert!(
+        average_allocation > 0.0,
+        "Even sybils should get minimum allocation"
+    );
 }
 
 #[test]
 fn test_combined_attack_botnet_and_whale() {
     // Simulate combined attack: botnet + monopoly whale
     // Tests system resilience against multiple simultaneous attack vectors
-    use variable_pricing::resource_manager::ResourceManager;
     use variable_pricing::resource_manager::Consumer;
+    use variable_pricing::resource_manager::ResourceManager;
 
     let mut rng = rand::thread_rng();
     let difficulty = 2u32;
@@ -532,12 +593,12 @@ fn test_combined_attack_botnet_and_whale() {
     }
 
     // Legitimate clients
-    let mut legit = PowClient::new(10000);
-    legit.generate_solutions(500000, difficulty, &mut rng);
+    let mut legitimate = PowClient::new(10000);
+    legitimate.generate_solutions(500000, difficulty, &mut rng);
 
     // Create allocation scenario
     let capacity = 1000.0;
-    let mut rm = ResourceManager::new(capacity);
+    let mut manager = ResourceManager::new(capacity);
 
     let mut clients = vec![Consumer::new(whale.id, whale.total_work, 1)];
 
@@ -545,24 +606,36 @@ fn test_combined_attack_botnet_and_whale() {
         clients.push(Consumer::new(botnet_client.id, botnet_client.total_work, 0));
     }
 
-    clients.push(Consumer::new(legit.id, legit.total_work, 5));
+    clients.push(Consumer::new(legitimate.id, legitimate.total_work, 5));
 
-    let allocated = rm.allocate(clients);
+    let allocated = manager.allocate(clients);
 
-    let whale_alloc = allocated.iter().find(|c| c.id == whale.id).unwrap().allocation;
-    let legit_alloc = allocated.iter().find(|c| c.id == legit.id).unwrap().allocation;
-    let botnet_total: f64 = allocated.iter()
+    let whale_allocation = allocated
+        .iter()
+        .find(|c| c.id == whale.id)
+        .unwrap()
+        .allocation;
+    let legitimate_allocation = allocated
+        .iter()
+        .find(|c| c.id == legitimate.id)
+        .unwrap()
+        .allocation;
+    let botnet_total: f64 = allocated
+        .iter()
         .filter(|c| c.id < 100)
         .map(|c| c.allocation)
         .sum();
 
     println!("Combined attack results:");
-    println!("  Whale: {:.2}", whale_alloc);
+    println!("  Whale: {:.2}", whale_allocation);
     println!("  Botnet total: {:.2}", botnet_total);
-    println!("  Legitimate: {:.2}", legit_alloc);
+    println!("  Legitimate: {:.2}", legitimate_allocation);
 
     // Legitimate client with tenure should get meaningful allocation
-    assert!(legit_alloc > capacity * 0.1, "Legitimate client should get >10%");
+    assert!(
+        legitimate_allocation > capacity * 0.1,
+        "Legitimate client should get >10%"
+    );
 
     // Total should respect capacity
     let total: f64 = allocated.iter().map(|c| c.allocation).sum();
@@ -573,18 +646,14 @@ fn test_combined_attack_botnet_and_whale() {
 fn test_resilience_against_flash_flood_attack() {
     // Simulate flash flood: sudden influx of many weak clients
     // Tests if system gracefully handles resource spikes
-    use variable_pricing::resource_manager::ResourceManager;
     use variable_pricing::resource_manager::Consumer;
+    use variable_pricing::resource_manager::ResourceManager;
 
     let mut rng = rand::thread_rng();
     let difficulty = 2u32;
 
     // Phase 1: Normal operation with few clients
-    let mut normal_clients = vec![
-        PowClient::new(1),
-        PowClient::new(2),
-        PowClient::new(3),
-    ];
+    let mut normal_clients = vec![PowClient::new(1), PowClient::new(2), PowClient::new(3)];
 
     for client in &mut normal_clients {
         client.generate_solutions(200000, difficulty, &mut rng);
@@ -600,129 +669,159 @@ fn test_resilience_against_flash_flood_attack() {
 
     // Allocate mixed scenario
     let capacity = 1000.0;
-    let mut rm = ResourceManager::new(capacity);
+    let mut manager = ResourceManager::new(capacity);
 
     let mut all_clients = Vec::new();
-    for nc in &normal_clients {
-        all_clients.push(Consumer::new(nc.id, nc.total_work, 5));
+    for normal_client in &normal_clients {
+        all_clients.push(Consumer::new(normal_client.id, normal_client.total_work, 5));
     }
-    for fc in &flood_clients {
-        all_clients.push(Consumer::new(fc.id, fc.total_work, 0));
+    for flood_client in &flood_clients {
+        all_clients.push(Consumer::new(flood_client.id, flood_client.total_work, 0));
     }
 
-    let allocated = rm.allocate(all_clients);
+    let allocated = manager.allocate(all_clients);
 
     // Normal clients should maintain reasonable allocations
-    let normal_allocs: Vec<f64> = allocated
+    let normal_allocations: Vec<f64> = allocated
         .iter()
         .filter(|c| c.id <= 3)
         .map(|c| c.allocation)
         .collect();
 
-    println!("Normal clients allocations: {:?}", normal_allocs);
-    assert!(normal_allocs.iter().all(|&a| a > 0.0), "Normal clients should get allocation");
+    println!("Normal clients allocations: {:?}", normal_allocations);
+    assert!(
+        normal_allocations.iter().all(|&a| a > 0.0),
+        "Normal clients should get allocation"
+    );
 
     // Flood clients should get diminished allocation
-    let flood_allocs: Vec<f64> = allocated
+    let flood_allocations: Vec<f64> = allocated
         .iter()
         .filter(|c| c.id > 100)
         .map(|c| c.allocation)
         .collect();
 
-    let flood_total: f64 = flood_allocs.iter().sum();
-    let normal_total: f64 = normal_allocs.iter().sum();
+    let flood_total: f64 = flood_allocations.iter().sum();
+    let normal_total: f64 = normal_allocations.iter().sum();
 
     println!("Flood clients total: {:.2}", flood_total);
     println!("Normal clients total: {:.2}", normal_total);
 
     // Even with flood, system should reach capacity
     let total: f64 = allocated.iter().map(|c| c.allocation).sum();
-    assert!(total > capacity * 0.9, "System should allocate most of capacity");
+    assert!(
+        total > capacity * 0.9,
+        "System should allocate most of capacity"
+    );
 }
 
 #[test]
 fn test_minimum_allocation_protection() {
     // Test that tenure-based minimum allocation protects against orphaning
-    use variable_pricing::resource_manager::ResourceManager;
     use variable_pricing::resource_manager::Consumer;
+    use variable_pricing::resource_manager::ResourceManager;
 
     let capacity = 1000.0;
-    let mut rm = ResourceManager::new(capacity);
+    let mut manager = ResourceManager::new(capacity);
 
     // Long-connected legitimate client with moderate contribution
-    let legit_work = 100_000u64;
-    let legit_epochs = 10u32;
+    let legitimate_work = 100_000u64;
+    let legitimate_epochs = 10u32;
 
     // Newcomer with extreme work
     let newcomer_work = 1_000_000u64;
     let newcomer_epochs = 0u32;
 
     let clients = vec![
-        Consumer::new(1, legit_work, legit_epochs),
+        Consumer::new(1, legitimate_work, legitimate_epochs),
         Consumer::new(2, newcomer_work, newcomer_epochs),
     ];
 
-    let allocated = rm.allocate(clients);
+    let allocated = manager.allocate(clients);
 
-    let legit = allocated.iter().find(|c| c.id == 1).unwrap();
+    let legitimate = allocated.iter().find(|c| c.id == 1).unwrap();
     let newcomer = allocated.iter().find(|c| c.id == 2).unwrap();
 
-    println!("Legit (100k work, 10 epochs): {:.2}", legit.allocation);
+    println!(
+        "Legitimate (100k work, 10 epochs): {:.2}",
+        legitimate.allocation
+    );
     println!("Newcomer (1M work, 0 epochs): {:.2}", newcomer.allocation);
 
-    // Despite 10x less work, legit client should get meaningful allocation due to tenure
-    assert!(legit.allocation > capacity * 0.05, "Tenure should provide minimum protection");
+    // Despite 10x less work, legitimate client should get meaningful allocation due to tenure
+    assert!(
+        legitimate.allocation > capacity * 0.05,
+        "Tenure should provide minimum protection"
+    );
 
     // Newcomer gets more due to work, but not everything
-    assert!(newcomer.allocation > legit.allocation, "More work should yield more allocation");
-    assert!(newcomer.allocation < capacity * 0.9, "Even huge work shouldn't monopolize");
+    assert!(
+        newcomer.allocation > legitimate.allocation,
+        "More work should yield more allocation"
+    );
+    assert!(
+        newcomer.allocation < capacity * 0.9,
+        "Even huge work shouldn't monopolize"
+    );
 }
 
 #[test]
 fn test_work_distribution_fairness_under_attack() {
     // Test that legitimate clients maintain fair share under various attacks
-    use variable_pricing::resource_manager::ResourceManager;
     use variable_pricing::resource_manager::Consumer;
+    use variable_pricing::resource_manager::ResourceManager;
 
     let capacity = 1000.0;
 
     // Scenario: 3 legitimate clients + 1 attacking whale
-    let legit_work = 100_000u64;
+    let legitimate_work = 100_000u64;
     let whale_work = 5_000_000u64;
 
     let clients = vec![
-        Consumer::new(1, legit_work, 5),
-        Consumer::new(2, legit_work, 5),
-        Consumer::new(3, legit_work, 5),
+        Consumer::new(1, legitimate_work, 5),
+        Consumer::new(2, legitimate_work, 5),
+        Consumer::new(3, legitimate_work, 5),
         Consumer::new(99, whale_work, 0), // Whale with no tenure
     ];
 
-    let mut rm = ResourceManager::new(capacity);
-    let allocated = rm.allocate(clients);
+    let mut manager = ResourceManager::new(capacity);
+    let allocated = manager.allocate(clients);
 
-    let legit_allocs: Vec<f64> = allocated
+    let legitimate_allocations: Vec<f64> = allocated
         .iter()
         .filter(|c| c.id <= 3)
         .map(|c| c.allocation)
         .collect();
 
-    let whale_alloc = allocated.iter().find(|c| c.id == 99).unwrap().allocation;
+    let whale_allocation = allocated.iter().find(|c| c.id == 99).unwrap().allocation;
 
-    let legit_total: f64 = legit_allocs.iter().sum();
+    let legitimate_total: f64 = legitimate_allocations.iter().sum();
 
-    println!("Legitimate clients total: {:.2}", legit_total);
-    println!("Whale allocation: {:.2}", whale_alloc);
-    println!("Legit/Whale ratio: {:.2}", legit_total / whale_alloc);
+    println!("Legitimate clients total: {:.2}", legitimate_total);
+    println!("Whale allocation: {:.2}", whale_allocation);
+    println!(
+        "Legitimate/Whale ratio: {:.2}",
+        legitimate_total / whale_allocation
+    );
 
     // Legitimate clients with tenure should get significant share
-    assert!(legit_total > capacity * 0.3, "Legitimate clients should get >30% combined");
+    assert!(
+        legitimate_total > capacity * 0.3,
+        "Legitimate clients should get >30% combined"
+    );
 
     // Whale shouldn't monopolize despite huge work
-    assert!(whale_alloc < capacity * 0.7, "Whale shouldn't exceed 70%");
+    assert!(
+        whale_allocation < capacity * 0.7,
+        "Whale shouldn't exceed 70%"
+    );
 
     // Spread across legitimate clients should be relatively even
-    let avg_legit = legit_total / 3.0;
-    for &alloc in &legit_allocs {
-        assert!((alloc - avg_legit).abs() < avg_legit * 0.5, "Legitimate allocation spread should be fair");
+    let average_legitimate = legitimate_total / 3.0;
+    for &allocation in &legitimate_allocations {
+        assert!(
+            (allocation - average_legitimate).abs() < average_legitimate * 0.5,
+            "Legitimate allocation spread should be fair"
+        );
     }
 }

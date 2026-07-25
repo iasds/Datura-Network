@@ -121,6 +121,5 @@ The `SecureAllocationSystem` struct in the [`resource_manager`] module implement
 the `calculate_allocation` method.
 */
 
-
-pub mod resource_manager;
 pub mod consts;
+pub mod resource_manager;

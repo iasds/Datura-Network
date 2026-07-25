@@ -8,8 +8,8 @@ use common::*;
 /// 3. Normal users trying to maintain fair access
 #[test]
 fn test_server_with_mixed_users_and_attackers() {
-    use variable_pricing::resource_manager::{ResourceManager, Consumer};
     use variable_pricing::consts::MIN_CONTRIBUTION_THRESHOLD;
+    use variable_pricing::resource_manager::{Consumer, ResourceManager};
 
     let mut rng = rand::thread_rng();
     let difficulty = 2u32; // 2+ leading zero bits
@@ -58,7 +58,8 @@ fn test_server_with_mixed_users_and_attackers() {
     println!("\nPowerful Attacker (whale):");
     println!("  Work: {}", whale_attacker.total_work);
     println!("  Qualifies: {}", whale_attacker.total_work > threshold);
-    println!("  Ratio to normal user avg: {:.2}x",
+    println!(
+        "  Ratio to normal user average: {:.2}x",
         whale_attacker.total_work as f64 / ((normal_total / 5) as f64)
     );
 
@@ -72,7 +73,7 @@ fn test_server_with_mixed_users_and_attackers() {
     // ALLOCATION PHASE: Allocate resources
     // ========================================================================
 
-    let mut rm = ResourceManager::new(capacity);
+    let mut manager = ResourceManager::new(capacity);
     let mut all_clients = Vec::new();
 
     // Add normal users with tenure (simulating established users)
@@ -92,51 +93,59 @@ fn test_server_with_mixed_users_and_attackers() {
         all_clients.push(Consumer::new(attacker.id, attacker.total_work, 0));
     }
 
-    let allocated = rm.allocate(all_clients);
+    let allocated = manager.allocate(all_clients);
 
     // ========================================================================
     // ANALYSIS PHASE: Results
     // ========================================================================
 
     // Extract allocations by category
-    let normal_allocs: Vec<f64> = allocated
+    let normal_allocations: Vec<f64> = allocated
         .iter()
         .filter(|c| c.id >= 1 && c.id <= 5)
         .map(|c| c.allocation)
         .collect();
 
-    let whale_alloc = allocated
-        .iter()
-        .find(|c| c.id == 9999)
-        .unwrap()
-        .allocation;
+    let whale_allocation = allocated.iter().find(|c| c.id == 9999).unwrap().allocation;
 
-    let weak_allocs: Vec<f64> = allocated
+    let weak_allocations: Vec<f64> = allocated
         .iter()
         .filter(|c| c.id >= 1000 && c.id < 1100)
         .map(|c| c.allocation)
         .collect();
 
-    let normal_total_alloc: f64 = normal_allocs.iter().sum();
-    let weak_total_alloc: f64 = weak_allocs.iter().sum();
-    let total_alloc: f64 = allocated.iter().map(|c| c.allocation).sum();
+    let normal_total_allocation: f64 = normal_allocations.iter().sum();
+    let weak_total_allocation: f64 = weak_allocations.iter().sum();
+    let total_allocation: f64 = allocated.iter().map(|c| c.allocation).sum();
 
     println!("\n=== Allocation Results ===");
     println!("\nNormal Users:");
-    println!("  Total allocation: {:.2} / {}", normal_total_alloc, capacity);
-    println!("  Percentage: {:.1}%", (normal_total_alloc / capacity) * 100.0);
-    println!("  Average per user: {:.2}", normal_total_alloc / 5.0);
+    println!(
+        "  Total allocation: {:.2} / {}",
+        normal_total_allocation, capacity
+    );
+    println!(
+        "  Percentage: {:.1}%",
+        (normal_total_allocation / capacity) * 100.0
+    );
+    println!("  Average per user: {:.2}", normal_total_allocation / 5.0);
 
     println!("\nPowerful Attacker (whale):");
-    println!("  Allocation: {:.2}", whale_alloc);
-    println!("  Percentage: {:.1}%", (whale_alloc / capacity) * 100.0);
+    println!("  Allocation: {:.2}", whale_allocation);
+    println!(
+        "  Percentage: {:.1}%",
+        (whale_allocation / capacity) * 100.0
+    );
 
     println!("\nWeak Attackers (botnet, unqualified):");
-    println!("  Total allocation: {:.2}", weak_total_alloc);
-    println!("  Percentage: {:.1}%", (weak_total_alloc / capacity) * 100.0);
-    println!("  Average per bot: {:.6}", weak_total_alloc / 100.0);
+    println!("  Total allocation: {:.2}", weak_total_allocation);
+    println!(
+        "  Percentage: {:.1}%",
+        (weak_total_allocation / capacity) * 100.0
+    );
+    println!("  Average per bot: {:.6}", weak_total_allocation / 100.0);
 
-    println!("\nTotal Allocated: {:.2} / {}", total_alloc, capacity);
+    println!("\nTotal Allocated: {:.2} / {}", total_allocation, capacity);
 
     // ========================================================================
     // ASSERTIONS: Verify system resilience
@@ -144,46 +153,46 @@ fn test_server_with_mixed_users_and_attackers() {
 
     // 1. Capacity should not be exceeded
     assert!(
-        total_alloc <= capacity * 1.001,
+        total_allocation <= capacity * 1.001,
         "Total allocation should not exceed capacity"
     );
 
     // 2. Normal users with tenure should get substantial allocation
     // They qualify and have tenure, so they benefit from both reserve and earned shares
     assert!(
-        normal_total_alloc > capacity * 0.30,
+        normal_total_allocation > capacity * 0.30,
         "Normal users with tenure should get 30%+ of capacity, got {:.1}%",
-        (normal_total_alloc / capacity) * 100.0
+        (normal_total_allocation / capacity) * 100.0
     );
 
     // 3. Powerful attacker should NOT monopolize
     // Even with 10x+ the work, compression and lack of tenure limits them
     assert!(
-        whale_alloc < capacity * 0.50,
+        whale_allocation < capacity * 0.50,
         "Whale attacker should not exceed 50% of capacity, got {:.1}%",
-        (whale_alloc / capacity) * 100.0
+        (whale_allocation / capacity) * 100.0
     );
 
     // 4. Weak attackers (unqualified) should get minimal allocation
     // They don't qualify for minimum guarantee, only earn from their tiny contribution
     assert!(
-        weak_total_alloc < capacity * 0.15,
+        weak_total_allocation < capacity * 0.15,
         "Unqualified weak attackers should get <15% of capacity, got {:.1}%",
-        (weak_total_alloc / capacity) * 100.0
+        (weak_total_allocation / capacity) * 100.0
     );
 
     // 5. Each weak attacker gets effectively nothing
-    let avg_weak = weak_total_alloc / 100.0;
+    let average_weak = weak_total_allocation / 100.0;
     assert!(
-        avg_weak < 0.5,
+        average_weak < 0.5,
         "Average weak attacker should get <0.5 allocation, got {:.6}",
-        avg_weak
+        average_weak
     );
 
     // 6. Normal users should fare dramatically better per capita than weak attackers
-    let avg_normal = normal_total_alloc / 5.0;
+    let average_normal = normal_total_allocation / 5.0;
     assert!(
-        avg_normal > avg_weak * 50.0,
+        average_normal > average_weak * 50.0,
         "Normal users should get 50x+ more than weak attackers"
     );
 
@@ -200,7 +209,7 @@ fn test_server_with_mixed_users_and_attackers() {
 /// Verifies that long-tenure users resist displacement by attackers
 #[test]
 fn test_tenure_protection_against_attackers() {
-    use variable_pricing::resource_manager::{ResourceManager, Consumer};
+    use variable_pricing::resource_manager::{Consumer, ResourceManager};
 
     let mut rng = rand::thread_rng();
     let difficulty = 2u32;
@@ -215,35 +224,41 @@ fn test_tenure_protection_against_attackers() {
     attacker.generate_solutions(2000000, difficulty, &mut rng); // 10x the work
 
     // Allocate with established user having tenure advantage
-    let mut rm = ResourceManager::new(capacity);
+    let mut manager = ResourceManager::new(capacity);
     let clients = vec![
         Consumer::new(1, established.total_work, 10), // 10 epochs tenure
-        Consumer::new(2, attacker.total_work, 0),    // No tenure
+        Consumer::new(2, attacker.total_work, 0),     // No tenure
     ];
 
-    let allocated = rm.allocate(clients);
+    let allocated = manager.allocate(clients);
 
-    let established_alloc = allocated.iter().find(|c| c.id == 1).unwrap().allocation;
-    let attacker_alloc = allocated.iter().find(|c| c.id == 2).unwrap().allocation;
+    let established_allocation = allocated.iter().find(|c| c.id == 1).unwrap().allocation;
+    let attacker_allocation = allocated.iter().find(|c| c.id == 2).unwrap().allocation;
 
     println!("\nTenure Protection Test:");
-    println!("Established user (200k work, 10 epochs): {:.2}", established_alloc);
-    println!("Attacker (2M work, 0 epochs): {:.2}", attacker_alloc);
-    println!("Ratio: {:.2}%", (established_alloc / attacker_alloc) * 100.0);
+    println!(
+        "Established user (200k work, 10 epochs): {:.2}",
+        established_allocation
+    );
+    println!("Attacker (2M work, 0 epochs): {:.2}", attacker_allocation);
+    println!(
+        "Ratio: {:.2}%",
+        (established_allocation / attacker_allocation) * 100.0
+    );
 
     // Despite 10x less work, established user should maintain decent allocation
     assert!(
-        established_alloc > capacity * 0.1,
+        established_allocation > capacity * 0.1,
         "Tenure should protect established user"
     );
 
     // Attacker gets more due to work, but tenure prevents monopoly
     assert!(
-        attacker_alloc > established_alloc,
+        attacker_allocation > established_allocation,
         "More work should yield more allocation"
     );
     assert!(
-        attacker_alloc < capacity * 0.7,
+        attacker_allocation < capacity * 0.7,
         "Even 10x work shouldn't dominate with tenure protection"
     );
 }
@@ -252,7 +267,7 @@ fn test_tenure_protection_against_attackers() {
 /// Verifies that weak unqualified attackers have minimal impact on legitimate users
 #[test]
 fn test_botnet_scaling_resistance() {
-    use variable_pricing::resource_manager::{ResourceManager, Consumer};
+    use variable_pricing::resource_manager::{Consumer, ResourceManager};
 
     let mut rng = rand::thread_rng();
     let difficulty = 2u32;
@@ -274,55 +289,52 @@ fn test_botnet_scaling_resistance() {
             weak_attackers.push(client);
         }
 
-        let mut rm = ResourceManager::new(capacity);
+        let mut manager = ResourceManager::new(capacity);
         let mut clients = vec![Consumer::new(9999, normal.total_work, 5)];
 
         for attacker in &weak_attackers {
             clients.push(Consumer::new(attacker.id, attacker.total_work, 0));
         }
 
-        let allocated = rm.allocate(clients);
-        let normal_alloc = allocated
-            .iter()
-            .find(|c| c.id == 9999)
-            .unwrap()
-            .allocation;
+        let allocated = manager.allocate(clients);
+        let normal_allocation = allocated.iter().find(|c| c.id == 9999).unwrap().allocation;
 
-        results.push((botnet_size, normal_alloc));
+        results.push((botnet_size, normal_allocation));
     }
 
     println!("\nBotnet Scaling Resistance (unqualified attackers):");
-    for (size, alloc) in &results {
-        println!("  Botnet size {}: normal user gets {:.2}", size, alloc);
+    for (size, allocation) in &results {
+        println!("  Botnet size {}: normal user gets {:.2}", size, allocation);
     }
 
     // Normal user should maintain strong allocation regardless of unqualified botnet size
-    for (_, alloc) in &results {
+    for (_, allocation) in &results {
         assert!(
-            *alloc > capacity * 0.6,
+            *allocation > capacity * 0.6,
             "Normal user with tenure should maintain >60% allocation against unqualified botnets"
         );
     }
 
     // Allocation should be relatively stable - unqualified attackers have minimal impact
     let allocations: Vec<f64> = results.iter().map(|(_, a)| *a).collect();
-    let avg = allocations.iter().sum::<f64>() / allocations.len() as f64;
+    let average = allocations.iter().sum::<f64>() / allocations.len() as f64;
     let max_deviation = allocations
         .iter()
-        .map(|a| (a - avg).abs())
+        .map(|a| (a - average).abs())
         .fold(0.0, f64::max);
 
     assert!(
-        max_deviation < avg * 0.15,
-        "Allocation should be stable - unqualified botnet size shouldn't matter much. Max deviation: {:.2}, avg: {:.2}",
-        max_deviation, avg
+        max_deviation < average * 0.15,
+        "Allocation should be stable - unqualified botnet size shouldn't matter much. Max deviation: {:.2}, average: {:.2}",
+        max_deviation,
+        average
     );
 }
 
 /// Tests the combined scenario of powerful monopoly attacker + coordinated weak attackers
 #[test]
 fn test_combined_whale_plus_botnet_attack() {
-    use variable_pricing::resource_manager::{ResourceManager, Consumer};
+    use variable_pricing::resource_manager::{Consumer, ResourceManager};
 
     let mut rng = rand::thread_rng();
     let difficulty = 2u32;
@@ -349,7 +361,7 @@ fn test_combined_whale_plus_botnet_attack() {
     }
 
     // Allocate
-    let mut rm = ResourceManager::new(capacity);
+    let mut manager = ResourceManager::new(capacity);
     let mut clients = Vec::new();
 
     for user in &users {
@@ -362,30 +374,42 @@ fn test_combined_whale_plus_botnet_attack() {
         clients.push(Consumer::new(attacker.id, attacker.total_work, 0));
     }
 
-    let allocated = rm.allocate(clients);
+    let allocated = manager.allocate(clients);
 
     // Analyze results
-    let user_allocs: Vec<f64> = allocated
+    let user_allocations: Vec<f64> = allocated
         .iter()
         .filter(|c| c.id >= 1 && c.id <= 3)
         .map(|c| c.allocation)
         .collect();
 
-    let whale_alloc = allocated.iter().find(|c| c.id == 9999).unwrap().allocation;
+    let whale_allocation = allocated.iter().find(|c| c.id == 9999).unwrap().allocation;
 
-    let botnet_allocs: Vec<f64> = allocated
+    let botnet_allocations: Vec<f64> = allocated
         .iter()
         .filter(|c| c.id >= 1000 && c.id < 1100)
         .map(|c| c.allocation)
         .collect();
 
-    let user_total: f64 = user_allocs.iter().sum();
-    let botnet_total: f64 = botnet_allocs.iter().sum();
+    let user_total_allocation: f64 = user_allocations.iter().sum();
+    let botnet_total_allocation: f64 = botnet_allocations.iter().sum();
 
     println!("\nCombined Whale + Unqualified Botnet Attack:");
-    println!("Normal users (qualified, tenure): {:.2} ({:.1}%)", user_total, (user_total / capacity) * 100.0);
-    println!("Whale (qualified, no tenure): {:.2} ({:.1}%)", whale_alloc, (whale_alloc / capacity) * 100.0);
-    println!("Botnet (unqualified): {:.2} ({:.1}%)", botnet_total, (botnet_total / capacity) * 100.0);
+    println!(
+        "Normal users (qualified, tenure): {:.2} ({:.1}%)",
+        user_total_allocation,
+        (user_total_allocation / capacity) * 100.0
+    );
+    println!(
+        "Whale (qualified, no tenure): {:.2} ({:.1}%)",
+        whale_allocation,
+        (whale_allocation / capacity) * 100.0
+    );
+    println!(
+        "Botnet (unqualified): {:.2} ({:.1}%)",
+        botnet_total_allocation,
+        (botnet_total_allocation / capacity) * 100.0
+    );
 
     // Verify system resilience
     let total: f64 = allocated.iter().map(|c| c.allocation).sum();
@@ -393,27 +417,36 @@ fn test_combined_whale_plus_botnet_attack() {
 
     // Users with tenure and qualification should maintain good allocation
     assert!(
-        user_total > capacity * 0.25,
+        user_total_allocation > capacity * 0.25,
         "Qualified users with tenure should get >25% against combined attacks, got {:.1}%",
-        (user_total / capacity) * 100.0
+        (user_total_allocation / capacity) * 100.0
     );
 
     // Whale limited by compression and lack of tenure
     assert!(
-        whale_alloc < capacity * 0.55,
+        whale_allocation < capacity * 0.55,
         "Whale should be limited to <55%, got {:.1}%",
-        (whale_alloc / capacity) * 100.0
+        (whale_allocation / capacity) * 100.0
     );
 
     // Unqualified botnet severely limited
     assert!(
-        botnet_total < capacity * 0.15,
+        botnet_total_allocation < capacity * 0.15,
         "Unqualified botnet should get <15%, got {:.1}%",
-        (botnet_total / capacity) * 100.0
+        (botnet_total_allocation / capacity) * 100.0
     );
 
     println!("\n✓ System resists combined attack vectors:");
-    println!("  Legitimate users (tenure + qualification): {:.1}%", (user_total / capacity) * 100.0);
-    println!("  Powerful attacker (quality over quantity): {:.1}%", (whale_alloc / capacity) * 100.0);
-    println!("  Weak attackers (unqualified): {:.1}%", (botnet_total / capacity) * 100.0);
+    println!(
+        "  Legitimate users (tenure + qualification): {:.1}%",
+        (user_total_allocation / capacity) * 100.0
+    );
+    println!(
+        "  Powerful attacker (quality over quantity): {:.1}%",
+        (whale_allocation / capacity) * 100.0
+    );
+    println!(
+        "  Weak attackers (unqualified): {:.1}%",
+        (botnet_total_allocation / capacity) * 100.0
+    );
 }

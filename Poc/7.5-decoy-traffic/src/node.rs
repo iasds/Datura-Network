@@ -95,6 +95,9 @@ pub fn run_decoy_source(
         Ok(stream) => stream,
         Err(_) => return,
     };
+    
+    // Seal noise with a random ephemeral keypair so Node C cannot open it
+    let (_, ephemeral_pk) = XWingKem::generate_keypair();
 
     for seq in 0..instruction.packet_count {
         let mut noise_payload = vec![0u8; instruction.packet_size as usize];
@@ -102,8 +105,6 @@ pub fn run_decoy_source(
             continue;
         }
 
-        // Seal noise with a random ephemeral keypair so Node C cannot open it
-        let (_, ephemeral_pk) = XWingKem::generate_keypair();
         let packet = match envelope::seal(&ephemeral_pk, &noise_payload) {
             Ok(p) => p,
             Err(_) => continue,

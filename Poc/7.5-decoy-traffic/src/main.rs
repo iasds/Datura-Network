@@ -17,11 +17,13 @@ use x_wing::{Kem, XWingKem};
 
 use envelope::DecoySourceInstruction;
 use node::{
-    Destination, NoisePacketSeen, run_decoy_source, run_noise_destination, send_instructions};
+    Destination, NoisePacketSeen, run_decoy_source, run_noise_destination, send_instructions,
+};
 
 /// Stores test report data
 struct DecoySourceDemo {
     control_tag: String,
+    noise_sent: usize,
     noise_received: usize,
     noise_opened: usize,
     elapsed: Duration,
@@ -45,16 +47,14 @@ fn run_decoy_source_demo() -> Result<DecoySourceDemo> {
     let b_listener = TcpListener::bind(("127.0.0.1", 0)).context("bind decoy source B")?;
     let b_port = b_listener.local_addr()?.port();
 
-    let c_dest = Destination {
-        secret: c_secret,
-    };
+    let c_dest = Destination { secret: c_secret };
     let (c_report_tx, c_report_rx) = mpsc::channel::<NoisePacketSeen>();
 
     let c_worker =
-        thread::spawn(move || run_noise_destination(c_listener, c_dest, 200, 10, c_report_tx));
+        thread::spawn(move || run_noise_destination(c_listener, c_dest, 10, c_report_tx));
 
     let (b_done_tx, b_done_rx) = mpsc::channel::<()>();
-    let (b_report_tx, _) = mpsc::channel::<NoisePacketSeen>();
+    let (b_report_tx, b_report_rx) = mpsc::channel::<NoisePacketSeen>();
     let b_worker = thread::spawn(move || {
         run_decoy_source(b_listener, b_secret, c_port, b_done_tx, b_report_tx)
     });
@@ -71,11 +71,27 @@ fn run_decoy_source_demo() -> Result<DecoySourceDemo> {
     let _ = b_done_rx.recv_timeout(Duration::from_secs(10));
     let elapsed = start.elapsed();
 
+    // Consume B's self-reports
+    let mut noise_sent = 0;
+    println!("--- decoy source (B) self-reports ---");
+    while let Ok(report) = b_report_rx.try_recv() {
+        noise_sent += 1;
+        println!("sent  seq={}  tag={}", report.seq, report.wire_tag);
+    }
+    if noise_sent == 0 {
+        println!("  (no reports received before channel closed)");
+    }
+
     let mut noise_received = 0;
     let mut noise_opened = 0;
+    println!("--- rdv destination (C) reports ---");
     for _ in 0..instruction.packet_count {
         if let Ok(report) = c_report_rx.recv_timeout(Duration::from_secs(5)) {
             noise_received += 1;
+            println!(
+                "received  seq={}  tag={}  opened={}",
+                report.seq, report.wire_tag, report.opened
+            );
             if report.opened {
                 noise_opened += 1;
             }
@@ -87,6 +103,7 @@ fn run_decoy_source_demo() -> Result<DecoySourceDemo> {
 
     Ok(DecoySourceDemo {
         control_tag,
+        noise_sent,
         noise_received,
         noise_opened,
         elapsed,
@@ -96,17 +113,23 @@ fn run_decoy_source_demo() -> Result<DecoySourceDemo> {
 /// Prints test report
 fn report_decoy_source(demo: &DecoySourceDemo) -> Result<()> {
     println!("decoy source control tag: {}", demo.control_tag);
+    println!("noise packets sent by B: {}", demo.noise_sent);
     println!("noise packets received by C: {}", demo.noise_received);
     println!("noise packets opened by C: {}", demo.noise_opened);
     println!("elapsed: {:?}", demo.elapsed);
 
+    if demo.noise_sent != 10 {
+        bail!("expected 10 noise packets sent, got {}", demo.noise_sent);
+    }
     if demo.noise_received != 10 {
-        bail!("expected 10 noise packets, got {}", demo.noise_received);
+        bail!(
+            "expected 10 noise packets received, got {}",
+            demo.noise_received
+        );
     }
     if demo.noise_opened != 0 {
         bail!("expected 0 opened noise packets, got {}", demo.noise_opened);
-    }
-    else {
+    } else {
         println!("\nEverything is OK: Decoy source sent cover traffic.");
     }
     Ok(())
@@ -127,16 +150,14 @@ mod tests {
         let b_listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
         let b_port = b_listener.local_addr().unwrap().port();
 
-        let c_dest = Destination {
-            secret: c_secret,
-        };
+        let c_dest = Destination { secret: c_secret };
         let (c_report_tx, c_report_rx) = mpsc::channel::<NoisePacketSeen>();
 
         let c_worker =
-            thread::spawn(move || run_noise_destination(c_listener, c_dest, 300, 10, c_report_tx));
+            thread::spawn(move || run_noise_destination(c_listener, c_dest, 10, c_report_tx));
 
         let (b_done_tx, b_done_rx) = mpsc::channel::<()>();
-        let (b_report_tx, _) = mpsc::channel::<NoisePacketSeen>();
+        let (b_report_tx, b_report_rx) = mpsc::channel::<NoisePacketSeen>();
         let b_worker = thread::spawn(move || {
             run_decoy_source(b_listener, b_secret, c_port, b_done_tx, b_report_tx)
         });
@@ -153,11 +174,26 @@ mod tests {
         let _ = b_done_rx.recv_timeout(Duration::from_secs(10));
         let elapsed = start.elapsed();
 
+        let mut noise_sent = 0;
+        println!("--- decoy source (B) self-reports ---");
+        while let Ok(report) = b_report_rx.try_recv() {
+            noise_sent += 1;
+            println!("sent  seq={}  tag={}", report.seq, report.wire_tag);
+        }
+        if noise_sent == 0 {
+            println!("  (no reports received before channel closed)");
+        }
+
         let mut noise_received = 0;
         let mut noise_opened = 0;
+        println!("--- rdv destination (C) reports ---");
         for _ in 0..instruction.packet_count {
             if let Ok(report) = c_report_rx.recv_timeout(Duration::from_secs(5)) {
                 noise_received += 1;
+                println!(
+                    "received  seq={}  tag={}  opened={}",
+                    report.seq, report.wire_tag, report.opened
+                );
                 if report.opened {
                     noise_opened += 1;
                 }

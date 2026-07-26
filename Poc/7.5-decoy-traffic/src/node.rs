@@ -5,8 +5,8 @@ use std::thread;
 use std::time::Duration;
 
 use anyhow::{Context, Result};
-use x_wing::{EncapsulationKey,DecapsulationKey};
 use getrandom::getrandom;
+use x_wing::{DecapsulationKey, EncapsulationKey, Kem, XWingKem};
 
 use crate::envelope::{self, PACKET_SIZE};
 
@@ -15,11 +15,10 @@ pub struct Destination {
     pub secret: DecapsulationKey,
 }
 
-
 /// One noise packet as observed by the RDV destination (Node C).
 pub struct NoisePacketSeen {
-    pub _seq: u32,
-    pub _wire_tag: String,
+    pub seq: u32,
+    pub wire_tag: String,
     pub opened: bool,
 }
 
@@ -29,34 +28,29 @@ pub fn wire_tag(bytes: &[u8]) -> String {
 }
 
 /// Node C: RDV destination for noise packets from a Decoy Source.
-/// Reads exactly `packet_size` bytes per connection and reports whether it could open them.
+/// Accepts one persistent connection and reads all packets over it.
 pub fn run_noise_destination(
     listener: TcpListener,
     dest: Destination,
-    packet_size: usize,
     expect: usize,
     report: Sender<NoisePacketSeen>,
 ) {
-    for seq in 0..expect {
-        let mut client_conn = match listener.accept() {
-            Ok((stream, _)) => stream,
-            Err(_) => return,
-        };
+    let mut client_conn = match listener.accept() {
+        Ok((stream, _)) => stream,
+        Err(_) => return,
+    };
 
-        let mut packet = vec![0u8; packet_size];
+    for seq in 0..expect {
+        let mut packet = vec![0u8; PACKET_SIZE];
         if client_conn.read_exact(&mut packet).is_err() {
-            continue;
+            break;
         }
 
-        let opened = if packet.len() == PACKET_SIZE {
-            envelope::open(&dest.secret, &packet).is_some()
-        } else {
-            false
-        };
+        let opened = envelope::open(&dest.secret, &packet).is_some();
 
         let _ = report.send(NoisePacketSeen {
-            _seq: seq.try_into().unwrap(),
-            _wire_tag: wire_tag(&packet),
+            seq: seq.try_into().unwrap(),
+            wire_tag: wire_tag(&packet),
             opened,
         });
     }
@@ -92,23 +86,36 @@ pub fn run_decoy_source(
         Err(_) => return,
     };
 
-    let interval_ns = (instruction.packet_size as u64 * 8 * 1_000_000_000)
-        .div_ceil(instruction.bitrate_bps);
+    let interval_ns =
+        (instruction.packet_size as u64 * 8 * 1_000_000_000).div_ceil(instruction.bitrate_bps);
     let interval = Duration::from_nanos(interval_ns.max(1));
 
+    // Open one persistent connection to Node C
+    let mut dest_conn = match TcpStream::connect(("127.0.0.1", noise_target_port)) {
+        Ok(stream) => stream,
+        Err(_) => return,
+    };
+
     for seq in 0..instruction.packet_count {
-        let mut noise = vec![0u8; instruction.packet_size as usize];
-        if getrandom(&mut noise).is_err() {
+        let mut noise_payload = vec![0u8; instruction.packet_size as usize];
+        if getrandom(&mut noise_payload).is_err() {
             continue;
         }
 
-        if let Ok(mut dest_conn) = TcpStream::connect(("127.0.0.1", noise_target_port)) {
-            let _ = dest_conn.write_all(&noise);
+        // Seal noise with a random ephemeral keypair so Node C cannot open it
+        let (_, ephemeral_pk) = XWingKem::generate_keypair();
+        let packet = match envelope::seal(&ephemeral_pk, &noise_payload) {
+            Ok(p) => p,
+            Err(_) => continue,
+        };
+
+        if dest_conn.write_all(&packet).is_err() {
+            break;
         }
 
         let _ = report.send(NoisePacketSeen {
-            _seq: seq,
-            _wire_tag: wire_tag(&noise),
+            seq,
+            wire_tag: wire_tag(&packet),
             opened: false,
         });
 
@@ -127,7 +134,6 @@ pub fn send_instructions(
     instruction: &envelope::DecoySourceInstruction,
     dest_port: u16,
 ) -> Result<String> {
-    use std::io::Write;
     let payload = envelope::encode_instruction(instruction)?;
     let packet = envelope::seal(b_public, &payload)?;
     let mut sock = TcpStream::connect(("127.0.0.1", dest_port))

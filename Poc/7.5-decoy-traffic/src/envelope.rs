@@ -62,8 +62,8 @@ pub fn decode_instruction(bytes: &[u8]) -> Result<DecoySourceInstruction> {
     if packet_count == 0 {
         bail!("packet_count must be > 0");
     }
-    if packet_size == 0 || packet_size > PACKET_SIZE as u16 {
-        bail!("packet_size must be 1..=PACKET_SIZE");
+    if packet_size == 0 || packet_size > MAX_PAYLOAD as u16 {
+        bail!("packet_size must be 1..=MAX_PAYLOAD");
     }
     if bitrate_bps == 0 {
         bail!("bitrate_bps must be > 0");

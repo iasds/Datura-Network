@@ -27,7 +27,9 @@ pub struct DecoySourceInstruction {
     pub destination_addr: u16,
     // Number of noise packets to generate.
     pub packet_count: u32,
-    // Byte length of each noise packet.
+    // Byte length of the inner random-noise payload (not wire packet size;
+    // every packet is padded and sealed to PACKET_SIZE). Controls only the
+    // number of random bytes generated per packet, not the observable size.
     pub packet_size: u16,
     // Target bitrate in bits per second.
     pub bitrate_bps: u64,
@@ -182,5 +184,28 @@ mod tests {
     fn demonstrates_decode_rejects_bad_input() {
         assert!(decode_instruction(&[]).is_err());
         assert!(decode_instruction(&[99]).is_err());
+        // 17-byte inputs that pass the length check but hit each field validation branch.
+        // Base valid fields: version=1, dest=1, count=5, size=100, bitrate=1
+        //
+        //  ─ version ─┬─ dest ─┬─ count ─┬─ size ─┬─ bitrate ─────────────
+        // [1,          1,0,      5,0,0,0,   100,0,    1,0,0,0,0,0,0,0]
+        assert!(
+            decode_instruction(&[0, 1, 0, 5, 0, 0, 0, 100, 0, 1, 0, 0, 0, 0, 0, 0, 0,]).is_err()
+        );
+        //                       ↑ version=0 (expected 1)
+        assert!(
+            decode_instruction(&[1, 1, 0, 0, 0, 0, 0, 100, 0, 1, 0, 0, 0, 0, 0, 0, 0,]).is_err()
+        );
+        //                                ↑ packet_count=0
+        assert!(decode_instruction(&[1, 1, 0, 5, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0,]).is_err());
+        //                                            ↑ packet_size=0
+        assert!(
+            decode_instruction(&[1, 1, 0, 5, 0, 0, 0, 231, 3, 1, 0, 0, 0, 0, 0, 0, 0,]).is_err()
+        );
+        //                                            ↑ packet_size=999 > MAX_PAYLOAD(898)
+        assert!(
+            decode_instruction(&[1, 1, 0, 5, 0, 0, 0, 100, 0, 0, 0, 0, 0, 0, 0, 0, 0,]).is_err()
+        );
+        //                                                    ↑ bitrate_bps=0
     }
 }

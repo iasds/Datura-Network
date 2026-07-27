@@ -57,12 +57,12 @@ pub fn run_noise_destination(
 }
 
 /// Node B: Decoy Source. Accepts one sealed instruction from Node A, opens it,
-/// then generates and transmits `packet_count` noise packets of `packet_size` bytes
-/// to Node C at the requested bitrate.
+/// then generates and transmits `packet_count` noise packets to Node C at the
+/// requested bitrate. Each wire packet is padded and sealed to PACKET_SIZE;
+/// `packet_size` in the instruction controls only the inner random-byte count.
 pub fn run_decoy_source(
     listener: TcpListener,
     own_secret: DecapsulationKey,
-    noise_target_port: u16,
     done: Sender<()>,
     report: Sender<NoisePacketSeen>,
 ) {
@@ -86,16 +86,17 @@ pub fn run_decoy_source(
         Err(_) => return,
     };
 
-    let interval_ns =
-        (instruction.packet_size as u64 * 8 * 1_000_000_000).div_ceil(instruction.bitrate_bps);
+    // The observable wire rate is determined by PACKET_SIZE (every packet is padded to this),
+    // not by the inner random-byte count (packet_size).
+    let interval_ns = (PACKET_SIZE as u64 * 8 * 1_000_000_000).div_ceil(instruction.bitrate_bps);
     let interval = Duration::from_nanos(interval_ns.max(1));
 
-    // Open one persistent connection to Node C
-    let mut dest_conn = match TcpStream::connect(("127.0.0.1", noise_target_port)) {
+    // Open one persistent connection to Node C using the instruction's destination
+    let mut dest_conn = match TcpStream::connect(("127.0.0.1", instruction.destination_addr)) {
         Ok(stream) => stream,
         Err(_) => return,
     };
-    
+
     // Seal noise with a random ephemeral keypair so Node C cannot open it
     let (_, ephemeral_pk) = XWingKem::generate_keypair();
 

@@ -10,3 +10,9 @@
 **/*.pdf
 **/states
 **/*TTrace*
+
+.*
+!.cargo-husky/
+!.cargo-husky/**
+!.forgejo/
+!.forgejo/**

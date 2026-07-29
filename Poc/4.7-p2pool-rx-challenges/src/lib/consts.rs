@@ -14,7 +14,7 @@ pub const SOLVER_CHANNEL_SIZE: usize = 64;
 ///number of items to keep in each thread worker input channel
 pub const WORKER_CHANNEL_SIZE: usize = 16;
 
-///estimation of usual verification timing (unused for now)
+///estimation of usual verification timing
 pub const VERIFY_USUAL_DURATION: Duration = Duration::from_millis(50);
 
 /// pow max lifetime, for random pows they will have an expiration between 0 and this lifetime

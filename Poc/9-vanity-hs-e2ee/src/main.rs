@@ -2,7 +2,7 @@ mod address;
 mod crypto;
 
 use address::{address_to_pubkey, pubkey_to_address};
-use crypto::{decrypt, encrypt, KEM_OUTPUT_LEN};
+use crypto::{KEM_OUTPUT_LEN, decrypt, encrypt};
 use ed25519_dalek::SigningKey;
 use rand::rngs::OsRng;
 use std::{
@@ -43,8 +43,12 @@ fn main() {
         },
         _ => {
             eprintln!("usage:");
-            eprintln!("  vanity-hs-e2ee server [port]                          # default port: 9009");
-            eprintln!("  vanity-hs-e2ee client <address.dn> <port> [message]   # default: hello datura network!");
+            eprintln!(
+                "  vanity-hs-e2ee server [port]                          # default port: 9009"
+            );
+            eprintln!(
+                "  vanity-hs-e2ee client <address.dn> <port> [message]   # default: hello datura network!"
+            );
             std::process::exit(1);
         }
     }
@@ -70,7 +74,7 @@ fn run_server(port: &str) {
 
     for stream in listener.incoming() {
         match stream {
-            Ok(mut s) => handle_connection(&mut s, &signing_key),
+            Ok(mut client_stream) => handle_connection(&mut client_stream, &signing_key),
             Err(e) => eprintln!("accept error: {e}"),
         }
     }
@@ -79,7 +83,7 @@ fn run_server(port: &str) {
 fn handle_connection(stream: &mut TcpStream, signing_key: &SigningKey) {
     let peer = stream
         .peer_addr()
-        .map(|a| a.to_string())
+        .map(|socket_addr| socket_addr.to_string())
         .unwrap_or_else(|_| "unknown".into());
 
     println!("[{peer}] connected");
@@ -146,14 +150,14 @@ fn run_client(address: &str, port: &str, message: &[u8]) {
     }
 
     // The entire key exchange is derived from the address alone.
-    let vk = address_to_pubkey(address).unwrap_or_else(|e| {
+    let recipient_verifying_key = address_to_pubkey(address).unwrap_or_else(|e| {
         eprintln!("invalid address: {e}");
         std::process::exit(1);
     });
 
     println!("extracted pubkey from address; no network lookup needed");
 
-    let (kem_output, ciphertext) = encrypt(&vk, message).unwrap_or_else(|e| {
+    let (kem_output, ciphertext) = encrypt(&recipient_verifying_key, message).unwrap_or_else(|e| {
         eprintln!("encryption failed: {e:?}");
         std::process::exit(1);
     });

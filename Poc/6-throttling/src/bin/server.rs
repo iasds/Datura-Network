@@ -26,6 +26,10 @@ const TIME_CAP: u64 = 3600; // 1h
 type NodeID = IpAddr; // node are identified by their ip address
 type NodeHashMap =
     Arc<Mutex<HashMap<NodeID, (Arc<RateLimiter>, Option<(Arc<JoinHandle<()>>, usize)>)>>>;
+// sent from a control connection handler to the RandomX VM thread to validate a
+// PoW solution: the requesting node's id, the challenge issued, the client's
+// solution, and a channel to send back whether the solution was valid.
+type PowValidationRequest = (NodeID, [u8; 16], [u8; 8], oneshot::Sender<bool>);
 
 // inspired from https://github.com/tokio-rs/tokio/blob/master/examples/echo-tcp.rs
 async fn data_thread(limiters: NodeHashMap) -> Result<(), Box<dyn Error>> {
@@ -44,9 +48,9 @@ async fn data_thread(limiters: NodeHashMap) -> Result<(), Box<dyn Error>> {
                     Ok(0) => {
                         return;
                     }
-                    Ok(n) => {
+                    Ok(bytes_read) => {
                         // write to the standard output. if writing fails, log and exit.
-                        if let Err(e) = stdout.write_all(&buf[0..n]).await {
+                        if let Err(e) = stdout.write_all(&buf[0..bytes_read]).await {
                             eprintln!("Failed to write to socket {}: {}", addr, e);
                             return;
                         }
@@ -57,12 +61,12 @@ async fn data_thread(limiters: NodeHashMap) -> Result<(), Box<dyn Error>> {
                             .and_modify(|(limiter, cancellations)| {
                                 let finished = cancellations
                                     .as_mut()
-                                    .map(|(timeout, cap)| {
-                                        if *cap > n {
-                                            *cap -= n;
+                                    .map(|(timeout_handle, remaining_cap)| {
+                                        if *remaining_cap > bytes_read {
+                                            *remaining_cap -= bytes_read;
                                             false
                                         } else {
-                                            timeout.abort();
+                                            timeout_handle.abort();
                                             true
                                         }
                                     })
@@ -96,7 +100,7 @@ async fn data_thread(limiters: NodeHashMap) -> Result<(), Box<dyn Error>> {
                             )
                             .clone();
 
-                        limiter.acquire(n).await;
+                        limiter.acquire(bytes_read).await;
                     }
                     Err(e) => {
                         eprintln!("Failed to read from socket {}: {}", addr, e);
@@ -109,7 +113,7 @@ async fn data_thread(limiters: NodeHashMap) -> Result<(), Box<dyn Error>> {
 }
 
 async fn control_thread(
-    tx: mpsc::Sender<(NodeID, [u8; 16], [u8; 8], oneshot::Sender<bool>)>,
+    tx: mpsc::Sender<PowValidationRequest>,
     limiters: NodeHashMap,
 ) -> Result<(), Box<dyn Error>> {
     let listener = TcpListener::bind(CONTROL_ADDR).await?;
@@ -127,13 +131,13 @@ async fn control_thread(
             socket.write_all(&challenge).await.unwrap();
 
             if socket.read(&mut solution).await.unwrap() == 8 {
-                let limiters_ = limiters.clone();
+                let limiters_for_timeout = limiters.clone();
 
-                let (vm_tx, vm_rx) = oneshot::channel::<bool>();
-                tx.send((addr.ip(), challenge, solution, vm_tx))
+                let (validation_tx, validation_rx) = oneshot::channel::<bool>();
+                tx.send((addr.ip(), challenge, solution, validation_tx))
                     .await
                     .unwrap();
-                if vm_rx.await.unwrap() {
+                if validation_rx.await.unwrap() {
                     limiters.lock().unwrap().insert(
                         addr.ip(),
                         (
@@ -149,7 +153,7 @@ async fn control_thread(
                             Some((
                                 Arc::new(tokio::spawn(async move {
                                     sleep(Duration::from_secs(TIME_CAP)).await;
-                                    limiters_.lock().unwrap().insert(
+                                    limiters_for_timeout.lock().unwrap().insert(
                                         addr.ip(),
                                         (
                                             Arc::new(
@@ -177,7 +181,7 @@ async fn control_thread(
 #[tokio::main]
 async fn main() {
     let limiters: NodeHashMap = Arc::new(Mutex::new(HashMap::new()));
-    let (tx, mut rx) = mpsc::channel::<(IpAddr, [u8; 16], [u8; 8], oneshot::Sender<bool>)>(4096);
+    let (tx, mut rx) = mpsc::channel::<PowValidationRequest>(4096);
 
     let vm_thread = thread::spawn(move || {
         let cache = RandomXCache::new(RandomXFlag::FLAG_DEFAULT, pow::SEED_HASH).unwrap();
@@ -189,8 +193,9 @@ async fn main() {
         )
         .unwrap();
 
-        while let Some((_node_id, challenge, solution, msg)) = rx.blocking_recv() {
-            msg.send(pow::validate_solution(&vm, challenge, solution))
+        while let Some((_node_id, challenge, solution, response_tx)) = rx.blocking_recv() {
+            response_tx
+                .send(pow::validate_solution(&vm, challenge, solution))
                 .unwrap();
         }
     });

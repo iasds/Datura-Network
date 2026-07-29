@@ -1,7 +1,7 @@
 # Building
 ```
-rustc -O bind.rs
-./bind
+cargo build --release
+cargo run --release
 ```
 
 # Notes

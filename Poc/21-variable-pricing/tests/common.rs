@@ -1,26 +1,15 @@
 use rand::Rng;
 
-/// Simple hash function for PoW mock (murmur-like)
-pub fn mock_hash(data: &[u8]) -> u64 {
-    let mut hash: u64 = 0;
-    for byte in data {
-        hash = hash.wrapping_mul(31).wrapping_add(*byte as u64);
-    }
-    hash
-}
-
-/// Count leading zeros in binary representation
-pub fn count_leading_zeros(val: u64) -> u32 {
-    val.leading_zeros()
-}
-
 /// Represents a PoW solution attempt from a client
+// `client_id` and `timestamp` are read by `pow_integration_test.rs` but not by
+// `attacker_simulation_test.rs`; since each integration test binary compiles this
+// shared module separately, clippy's per-binary dead-code analysis flags them here.
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct PowSolution {
     pub client_id: u64,
     pub nonce: u64,
     pub timestamp: u64,
-    pub difficulty_target: u64,
 }
 
 /// Mock PoW verifier that validates solutions
@@ -45,13 +34,6 @@ impl PowVerifier {
         let work_level = (solution.nonce % 256) as u32;
         work_level < threshold
     }
-
-    /// Calculate work difficulty from a solution
-    pub fn calculate_work_difficulty(&self, solution: &PowSolution) -> u32 {
-        let value = (solution.nonce % 256) as u32;
-        // Count how many bits we satisfy
-        if value < 16 { 4 } else if value < 32 { 3 } else if value < 64 { 2 } else if value < 128 { 1 } else { 0 }
-    }
 }
 
 /// Client performing PoW work
@@ -75,7 +57,7 @@ impl PowClient {
     /// Uses rand to generate pseudo-solutions and mock hash verification
     pub fn generate_solutions(
         &mut self,
-        num_attempts: u64,
+        attempt_count: u64,
         difficulty: u32,
         mut _rng: impl Rng,
     ) -> Vec<PowSolution> {
@@ -86,7 +68,7 @@ impl PowClient {
             .unwrap()
             .as_secs();
 
-        for _ in 0..num_attempts {
+        for _ in 0..attempt_count {
             // Generate random nonce
             let nonce = rand::random::<u64>();
 
@@ -94,7 +76,6 @@ impl PowClient {
                 client_id: self.id,
                 nonce,
                 timestamp,
-                difficulty_target: difficulty as u64,
             };
 
             // Verify using mock PoW verifier

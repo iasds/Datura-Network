@@ -10,6 +10,8 @@ Please [read the specification document](spec/specification.md) to know where we
 
 ## How can I contribute?
 
+### For the code-level contribution workflow (formatting, linting, git hooks, documentation and file-organization conventions), see [CONTRIBUTING.md](CONTRIBUTING.md).
+
 The contribution process heavily follows how we handle [contributions for the opsec bible](http://opbible7nans45sg33cbyeiwqmlp5fu7lklu6jd6f3mivrjeqadco5yd.onion/opsec/contribute/). Payments are as they are advertised on our [xmrbazaar listing](https://xmrbazaar.com/listing/cwGf/):
 
 The rewards are based on the (justified) complexity tags on the project board http://gdatura24gtdy23lxd7ht3xzx6mi7mdlkabpvuefhrjn4t5jduviw5ad.onion/Nowhere/Datura-Network/projects/19 (i pledge to not change those prices for the entirety of 2026)

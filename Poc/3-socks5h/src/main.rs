@@ -1,49 +1,102 @@
-//! PoC 3: SOCKS5-tunneled UDP/TCP forwarding through a `dante` proxy.
+//! PoC 3: SOCKS5-relayed UDP/TCP forwarding through a chain of SOCKS5 nodes.
 //!
-//! This PoC demonstrates wrapping raw UDP and TCP traffic into a SOCKS5 CONNECT
-//! tunnel (via `fast_socks5`) and forwarding it to a downstream node. It is
-//! intentionally single-hop and display-only: payloads are printed to stdout as
-//! they move through the pipeline, and no return path back to the original
-//! UDP/TCP client is implemented.
+//! This PoC demonstrates two things multiplexed onto a single `local_node`
+//! listener:
 //!
-//! Two roles are selected via CLI flags in `main`:
-//! - `app`: binds local UDP/TCP listeners, receives traffic, and tunnels each
-//!   payload through a SOCKS5 proxy to a remote node.
-//! - `node`: binds a TCP listener and receives tunneled payloads forwarded by
-//!   `app` (via the proxy), printing them out.
+//! 1. Wrapping raw UDP and TCP payloads that `local_node` captures locally
+//!    into a tagged envelope, sent through the chain inside a SOCKS5 CONNECT
+//!    tunnel that targets a reserved sentinel address (`0.0.0.0:0`). This is
+//!    "Case X".
+//! 2. Chaining a genuine local SOCKS5 client's CONNECT request through the
+//!    chain via a second, outer SOCKS5 CONNECT that targets the client's
+//!    real requested destination (SOCKS5-in-SOCKS5). This is "Case Y".
+//!
+//! There is no more external `dante` proxy: every hop is a pure
+//! `fast_socks5::server`-based SOCKS5 server. Each hop terminates the
+//! inbound SOCKS5 handshake itself and inspects the negotiated CONNECT
+//! target to decide what to do with it:
+//!
+//! - target == `0.0.0.0:0` (the sentinel) -> envelope mode (Case X). Only
+//!   `exit_node` interprets this: it reads the tagged envelope (see below)
+//!   and prints what was reconstructed.
+//! - any other target -> passthrough mode (Case Y). Only `exit_node`
+//!   interprets this: it prints the target and drain/discards whatever
+//!   bytes arrive. No real destination is ever dialed and no reply bytes
+//!   are ever written back; this PoC remains display-only, with no return
+//!   path to the original UDP/TCP/SOCKS5 client.
+//!
+//! ## Envelope wire format (Case X only)
+//!
+//! ```text
+//! Offset  Size   Field       Value / meaning
+//! 0       1      VERSION     0x01
+//! 1       1      TRANSPORT   0x00 = raw UDP, 0x01 = raw TCP
+//! 2       4      PAYLOAD_LEN u32 big-endian
+//! 6       N      PAYLOAD     raw captured bytes
+//! ```
+//!
+//! ## Roles
+//!
+//! Three roles are selected via `--role` in `main`, forming a chain
+//! `local_node -> mid_node* -> exit_node`:
+//!
+//! - `local_node`: binds a single local UDP socket and a single local TCP
+//!   listener on `--port` (9051 by default in typical usage, though
+//!   `--port` is always required explicitly). Every UDP datagram and every
+//!   raw TCP connection is relayed to `--next-hop` via the tagged envelope
+//!   (Case X). Every TCP connection that looks like a genuine SOCKS5 client
+//!   handshake (first byte `0x05`) is instead chained through to
+//!   `--next-hop` via real SOCKS5-in-SOCKS5 (Case Y).
+//! - `mid_node`: optional, and may be repeated zero or more times between
+//!   `local_node` and `exit_node` to form an arbitrarily long chain. It is
+//!   envelope-blind: for every accepted connection it terminates the
+//!   inbound SOCKS5 handshake, learns the negotiated target (sentinel or
+//!   real, it does not care which), re-negotiates an identical outer SOCKS5
+//!   CONNECT to that same target one hop downstream at `--next-hop`, and
+//!   bidirectionally copies bytes between the two connections. It never
+//!   reads or interprets the envelope.
+//! - `exit_node`: binds a TCP listener on `--port` and runs a SOCKS5 server
+//!   that only ever prints what it receives; it never dials any real
+//!   destination and has no successor (`--next-hop` is forbidden for this
+//!   role).
 
-use fast_socks5::client::{Config, Socks5Stream};
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+mod helpers;
+
+use fast_socks5::server::{Config as ServerConfig, Socks5Socket};
+use fast_socks5::util::target_addr::TargetAddr;
+use helpers::{
+    ENVELOPE_VERSION, SENTINEL_PORT, TRANSPORT_TCP, TRANSPORT_UDP, relay_socks5, require_next_hop,
+    tunnel_envelope,
+};
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+use std::sync::Arc;
+use tokio::io::AsyncReadExt;
 use tokio::net::{TcpListener, UdpSocket};
 
 fn main() {
     let command_line_arguments: Vec<String> = std::env::args().collect();
 
+    let mut role: Option<String> = None;
     let mut listen_port: Option<u16> = None;
-    let mut proxy_host: Option<String> = None;
-    let mut proxy_port: Option<u16> = None;
-    let mut remote_host: Option<String> = None;
-    let mut remote_port: Option<u16> = None;
+    let mut next_hop_address: Option<String> = None;
+    let mut mid_listen_port: Option<u16> = None;
 
     // Simple flag parser: walks consecutive pairs of args looking for
     // "--flag value" combinations.
     for argument_pair in command_line_arguments.windows(2) {
         match argument_pair[0].as_str() {
+            "--role" => role = Some(argument_pair[1].clone()),
             "--port" => listen_port = Some(argument_pair[1].parse().expect("invalid --port")),
-            "--proxy" => proxy_host = Some(argument_pair[1].clone()),
-            "--proxy-port" => {
-                proxy_port = Some(argument_pair[1].parse().expect("invalid --proxy-port"))
-            }
-            "--remote-host" => remote_host = Some(argument_pair[1].clone()),
-            "--remote-port" => {
-                remote_port = Some(argument_pair[1].parse().expect("invalid --remote-port"))
+            "--next-hop" => next_hop_address = Some(argument_pair[1].clone()),
+            "--mid-port" => {
+                mid_listen_port = Some(argument_pair[1].parse().expect("invalid --mid-port"))
             }
             _ => {}
         }
     }
 
     let listen_port = listen_port.unwrap_or_else(|| {
-        eprintln!("--port is required");
+        eprintln!("--port is required (e.g. --port 9051)");
         std::process::exit(1);
     });
 
@@ -52,30 +105,60 @@ fn main() {
         .build()
         .unwrap();
 
-    // If proxy + remote target flags are all present, run as the `app` (entry)
-    // role; if none are present, run as the `node` (mid/exit) role. Any partial
-    // combination is a usage error.
-    match (proxy_host, proxy_port, remote_host, remote_port) {
-        (Some(proxy_host), Some(proxy_port), Some(remote_host), Some(remote_port)) => {
-            let proxy_address = format!("{}:{}", proxy_host, proxy_port);
-            runtime.block_on(app(listen_port, proxy_address, remote_host, remote_port));
+    match role.as_deref() {
+        Some("local_node") => {
+            let next_hop_address = require_next_hop(next_hop_address, "local_node");
+            if mid_listen_port == Some(listen_port) {
+                eprintln!(
+                    "--mid-port must differ from --port (cannot bind twice on the same port)"
+                );
+                std::process::exit(1);
+            }
+            runtime.block_on(local_node(listen_port, next_hop_address, mid_listen_port));
         }
-        (None, None, None, None) => {
-            runtime.block_on(node(listen_port));
+        Some("mid_node") => {
+            if mid_listen_port.is_some() {
+                eprintln!("--mid-port is only valid for --role local_node");
+                std::process::exit(1);
+            }
+            let next_hop_address = require_next_hop(next_hop_address, "mid_node");
+            runtime.block_on(mid_node(listen_port, next_hop_address));
+        }
+        Some("exit_node") => {
+            if next_hop_address.is_some() {
+                eprintln!("--next-hop is forbidden for exit_node");
+                std::process::exit(1);
+            }
+            if mid_listen_port.is_some() {
+                eprintln!("--mid-port is only valid for --role local_node");
+                std::process::exit(1);
+            }
+            runtime.block_on(exit_node(listen_port));
         }
         _ => {
-            eprintln!("entry node requires --port, --proxy, --proxy-port, --remote-host, --remote-port");
-            eprintln!("mid/exit node requires only --port");
+            eprintln!("--role must be one of: local_node | mid_node | exit_node");
             std::process::exit(1);
         }
     }
 }
 
-/// Entry-node role: binds local UDP and TCP listeners on `listen_port`, and for
-/// every datagram/connection received, forwards the payload through a SOCKS5
-/// tunnel (see `tunnel`) to `remote_host:remote_port` via the proxy at
-/// `proxy_address`.
-async fn app(listen_port: u16, proxy_address: String, remote_host: String, remote_port: u16) {
+/// `local_node` role: binds one local UDP socket and one local TCP listener
+/// on `listen_port`. Every UDP datagram (Path A) and every raw TCP
+/// connection (Path B, i.e. a TCP connection whose first byte is not
+/// `0x05`) is relayed to `next_hop_address` via the Case X envelope (see
+/// `helpers::tunnel_envelope`). Every TCP connection that looks like a
+/// genuine SOCKS5 client handshake (first byte `0x05`, Path C) is instead
+/// chained through to `next_hop_address` via real SOCKS5-in-SOCKS5 relay
+/// (see `helpers::relay_socks5`).
+async fn local_node(listen_port: u16, next_hop_address: String, mid_port: Option<u16>) {
+    // Opt-in co-hosting: also run a mid_node SOCKS5 relay listener in this
+    // same process on `mid_port`, sharing `next_hop_address`. Spawned before
+    // this node's own UDP/TCP entry-node loops so both roles run concurrently.
+    if let Some(mid_port) = mid_port {
+        let mid_next_hop = next_hop_address.clone();
+        tokio::spawn(mid_node(mid_port, mid_next_hop));
+    }
+
     let bind_address = format!("127.0.0.1:{}", listen_port);
 
     let udp_socket = UdpSocket::bind(bind_address.clone())
@@ -85,9 +168,9 @@ async fn app(listen_port: u16, proxy_address: String, remote_host: String, remot
         .await
         .expect("failed to bind TCP");
 
-    // UDP logic: read datagrams in a loop and spawn a tunnel task per datagram.
-    let proxy_address_for_udp = proxy_address.clone();
-    let remote_host_for_udp = remote_host.clone();
+    // Path A: raw UDP. Read datagrams in a loop and relay each one to the
+    // next hop as a Case X envelope.
+    let next_hop_for_udp = next_hop_address.clone();
     tokio::spawn(async move {
         let mut receive_buffer = [0u8; 65535];
 
@@ -100,17 +183,11 @@ async fn app(listen_port: u16, proxy_address: String, remote_host: String, remot
             );
 
             let payload = receive_buffer[..bytes_received].to_vec();
-            let proxy_address_for_tunnel = proxy_address_for_udp.clone();
-            let remote_host_for_tunnel = remote_host_for_udp.clone();
+            let next_hop_for_tunnel = next_hop_for_udp.clone();
 
             tokio::spawn(async move {
-                if let Err(tunnel_error) = tunnel(
-                    proxy_address_for_tunnel,
-                    remote_host_for_tunnel,
-                    remote_port,
-                    payload,
-                )
-                .await
+                if let Err(tunnel_error) =
+                    tunnel_envelope(next_hop_for_tunnel, TRANSPORT_UDP, payload).await
                 {
                     eprintln!("tunnel error: {tunnel_error}");
                 }
@@ -118,110 +195,184 @@ async fn app(listen_port: u16, proxy_address: String, remote_host: String, remot
         }
     });
 
-    // TCP logic: accept connections in a loop and spawn a tunnel task per
-    // connection, tunneling whatever is read from the first `read` call.
+    // Path B / Path C: TCP. Accept connections in a loop, peek the first
+    // byte to decide whether this is a genuine SOCKS5 client (Path C) or
+    // raw TCP to be relayed as an envelope (Path B).
     loop {
-        let (mut tcp_stream, peer_address) = tcp_listener.accept().await.unwrap();
-        let proxy_address_for_tcp = proxy_address.clone();
-        let remote_host_for_tcp = remote_host.clone();
+        let (tcp_stream, peer_address) = tcp_listener.accept().await.unwrap();
+        let next_hop_for_tcp = next_hop_address.clone();
 
         tokio::spawn(async move {
-            let mut tcp_receive_buffer = [0u8; 65535];
-
-            match tcp_stream.read(&mut tcp_receive_buffer).await {
-                Ok(bytes_read) if bytes_read > 0 => {
-                    let payload = tcp_receive_buffer[..bytes_read].to_vec();
-
-                    println!("TCP out: {:?}", String::from_utf8_lossy(&payload));
-                    if let Err(tunnel_error) = tunnel(
-                        proxy_address_for_tcp,
-                        remote_host_for_tcp,
-                        remote_port,
-                        payload,
-                    )
-                    .await
-                    {
-                        eprintln!("tunnel error: {tunnel_error}");
-                    }
+            let mut first_byte = [0u8; 1];
+            let peeked_bytes = match tcp_stream.peek(&mut first_byte).await {
+                Ok(count) => count,
+                Err(peek_error) => {
+                    eprintln!("TCP peek error: {peek_error}");
+                    return;
                 }
-                Ok(_) => println!("TCP out to {})", peer_address),
-                Err(read_error) => eprintln!("TCP error: {read_error}"),
+            };
+
+            if peeked_bytes == 0 {
+                println!("TCP out to {} (empty connection)", peer_address);
+                return;
+            }
+
+            if first_byte[0] == 0x05 {
+                // Path C: genuine inbound SOCKS5 client.
+                if let Err(relay_error) = relay_socks5(tcp_stream, next_hop_for_tcp).await {
+                    eprintln!("relay error: {relay_error}");
+                }
+            } else {
+                // Path B: raw TCP, relay as a Case X envelope.
+                let mut tcp_stream = tcp_stream;
+                let mut tcp_receive_buffer = [0u8; 65535];
+
+                match tcp_stream.read(&mut tcp_receive_buffer).await {
+                    Ok(bytes_read) if bytes_read > 0 => {
+                        let payload = tcp_receive_buffer[..bytes_read].to_vec();
+
+                        println!("TCP out: {:?}", String::from_utf8_lossy(&payload));
+                        if let Err(tunnel_error) =
+                            tunnel_envelope(next_hop_for_tcp, TRANSPORT_TCP, payload).await
+                        {
+                            eprintln!("tunnel error: {tunnel_error}");
+                        }
+                    }
+                    Ok(_) => println!("TCP out to {} (empty payload)", peer_address),
+                    Err(read_error) => eprintln!("TCP error: {read_error}"),
+                }
             }
         });
     }
 }
 
-/// Opens a SOCKS5 CONNECT tunnel through `proxy_address` to
-/// `remote_host:remote_port`, then sends `payload` using a simple
-/// length-prefixed framing: a big-endian u32 byte length followed by the raw
-/// payload bytes. This framing lets the receiving `node` know exactly how many
-/// bytes to read for the message, since SOCKS5/TCP is just a byte stream with
-/// no built-in message boundaries.
-///
-/// After sending, it reads back a u32-prefixed reply. This PoC is display-only
-/// with no real return path, so `node` always replies with a zero-length
-/// message (see `node`) and no reply bytes are actually read in practice.
-async fn tunnel(
-    proxy_address: String,
-    remote_host: String,
-    remote_port: u16,
-    payload: Vec<u8>,
-) -> fast_socks5::Result<()> {
-    let mut socks5_stream =
-        Socks5Stream::connect(proxy_address, remote_host, remote_port, Config::default()).await?;
-
-    socks5_stream
-        .write_all(&(payload.len() as u32).to_be_bytes())
-        .await?;
-    socks5_stream.write_all(&payload).await?;
-
-    println!("tunnel out: {:?}", String::from_utf8_lossy(&payload));
-
-    let reply_length = socks5_stream.read_u32().await? as usize;
-    if reply_length > 0 {
-        let mut reply_buffer = vec![0u8; reply_length];
-        socks5_stream.read_exact(&mut reply_buffer).await?;
-        println!("sent: {}", String::from_utf8_lossy(&reply_buffer));
-    }
-
-    Ok(())
-}
-
-/// Mid/exit-node role: binds a TCP listener on `listen_port` and, for each
-/// incoming connection, reads one length-prefixed message (u32 big-endian
-/// length + payload, matching the framing written by `tunnel`) and prints it.
-async fn node(listen_port: u16) {
+/// `mid_node` role: binds a TCP listener on `listen_port` and, for every
+/// accepted connection (unconditionally, no first-byte peek, no UDP
+/// socket), relays it to `next_hop_address` via `helpers::relay_socks5`. It
+/// has none of `local_node`'s Path A/B envelope-construction logic and
+/// never parses an envelope itself; it is a pure, transparent,
+/// envelope-blind SOCKS5 relay. Zero or more `mid_node` hops may sit
+/// between `local_node` and `exit_node`.
+async fn mid_node(listen_port: u16, next_hop_address: String) {
     let tcp_listener = TcpListener::bind(format!("127.0.0.1:{}", listen_port))
         .await
         .expect("failed to bind TCP");
 
     loop {
-        let (mut tcp_stream, _peer_address) = tcp_listener.accept().await.unwrap();
-
-        println!("TCP through");
+        let (tcp_stream, _peer_address) = tcp_listener.accept().await.unwrap();
+        let next_hop_address = next_hop_address.clone();
 
         tokio::spawn(async move {
-            let payload_length = match tcp_stream.read_u32().await {
-                Ok(length) => length as usize,
-                Err(read_error) => {
-                    eprintln!("error in strem creation: {read_error}");
+            if let Err(relay_error) = relay_socks5(tcp_stream, next_hop_address).await {
+                eprintln!("relay error: {relay_error}");
+            }
+        });
+    }
+}
+
+/// `exit_node` role: binds a TCP listener on `listen_port` and runs a pure
+/// SOCKS5 server. For every accepted connection, terminates the inbound
+/// SOCKS5 handshake and inspects the negotiated CONNECT target:
+///
+/// - if it is the sentinel `0.0.0.0:0`, this is Case X (envelope mode): read
+///   the tagged envelope and print what was reconstructed.
+/// - otherwise, this is Case Y (passthrough mode): print the target and
+///   drain/discard whatever bytes arrive until EOF.
+///
+/// `exit_node` never dials any real destination and never writes a reply;
+/// it only prints. It has no successor hop.
+async fn exit_node(listen_port: u16) {
+    let tcp_listener = TcpListener::bind(format!("127.0.0.1:{}", listen_port))
+        .await
+        .expect("failed to bind TCP");
+
+    let server_config: Arc<ServerConfig> = Arc::new(ServerConfig::default());
+
+    loop {
+        let (tcp_stream, _peer_address) = tcp_listener.accept().await.unwrap();
+        let server_config = server_config.clone();
+
+        tokio::spawn(async move {
+            let socks5_socket = Socks5Socket::new(tcp_stream, server_config);
+            let mut socks5_socket = match socks5_socket.upgrade_to_socks5().await {
+                Ok(socket) => socket,
+                Err(handshake_error) => {
+                    eprintln!("SOCKS5 handshake error: {handshake_error}");
                     return;
                 }
             };
 
-            let mut payload = vec![0u8; payload_length];
-            if let Err(read_error) = tcp_stream.read_exact(&mut payload).await {
-                eprintln!("error with payload: {read_error}");
-                return;
+            let target_addr = socks5_socket.target_addr().cloned();
+            let (target_host, target_port) = match target_addr {
+                Some(TargetAddr::Ip(socket_address)) => {
+                    (socket_address.ip().to_string(), socket_address.port())
+                }
+                Some(TargetAddr::Domain(domain, port)) => (domain, port),
+                None => {
+                    eprintln!("inbound SOCKS5 handshake produced no target address");
+                    return;
+                }
+            };
+
+            let sentinel_address =
+                SocketAddr::new(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)), SENTINEL_PORT);
+            let is_sentinel = target_host == sentinel_address.ip().to_string()
+                && target_port == sentinel_address.port();
+
+            if is_sentinel {
+                // Case X: envelope mode.
+                let mut header = [0u8; 6];
+                if let Err(read_error) = socks5_socket.read_exact(&mut header).await {
+                    eprintln!("envelope header read error: {read_error}");
+                    return;
+                }
+
+                let version = header[0];
+                let transport = header[1];
+                let payload_length =
+                    u32::from_be_bytes([header[2], header[3], header[4], header[5]]) as usize;
+
+                if version != ENVELOPE_VERSION {
+                    eprintln!("unknown envelope version {version}");
+                    return;
+                }
+
+                let mut payload = vec![0u8; payload_length];
+                if let Err(read_error) = socks5_socket.read_exact(&mut payload).await {
+                    eprintln!("envelope payload read error: {read_error}");
+                    return;
+                }
+
+                match transport {
+                    TRANSPORT_UDP => println!(
+                        "UDP reconstructed ({} bytes): {:?}",
+                        payload_length,
+                        String::from_utf8_lossy(&payload)
+                    ),
+                    TRANSPORT_TCP => println!(
+                        "TCP reconstructed ({} bytes): {:?}",
+                        payload_length,
+                        String::from_utf8_lossy(&payload)
+                    ),
+                    _ => eprintln!("unknown transport tag {transport}"),
+                }
+            } else {
+                // Case Y: passthrough mode. No real destination is ever
+                // dialed; just drain/discard whatever arrives until EOF.
+                println!("SOCKS5 passthrough -> {}:{}", target_host, target_port);
+
+                let mut scratch_buffer = [0u8; 65535];
+                loop {
+                    match socks5_socket.read(&mut scratch_buffer).await {
+                        Ok(0) => break,
+                        Ok(_bytes_read) => continue,
+                        Err(read_error) => {
+                            eprintln!("passthrough read error: {read_error}");
+                            break;
+                        }
+                    }
+                }
             }
-
-            println!("sent through: {}", String::from_utf8_lossy(&payload));
-
-            // Send back a zero-length reply so `tunnel`'s `read_u32` call
-            // completes cleanly. This PoC has no real return path; the
-            // zero-length reply exists purely so the write side of the
-            // connection is properly finished off instead of erroring out.
-            let _ = tcp_stream.write_all(&0u32.to_be_bytes()).await;
         });
     }
 }

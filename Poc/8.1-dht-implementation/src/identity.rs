@@ -1,10 +1,9 @@
+use data_encoding::BASE32_NOPAD;
 use ed25519_dalek::{SigningKey, VerifyingKey};
-use rand::rngs::OsRng;
 use rand::RngCore;
+use rand::rngs::OsRng;
 use sha2::{Digest as Sha2Digest, Sha256};
 use sha3::{Digest as Sha3Digest, Sha3_256};
-use data_encoding::BASE32_NOPAD;
-use hex;
 
 pub type NodeId = [u8; 32];
 
@@ -74,17 +73,17 @@ impl Identity {
 
     /// Turn the public key into a .dn address.
     pub fn get_address(&self) -> String {
-        let pk = self.verifying_key.to_bytes();
+        let public_key_bytes = self.verifying_key.to_bytes();
 
         let mut hasher = Sha3_256::new();
         hasher.update(b".dn checksum");
-        hasher.update(&pk);
+        hasher.update(public_key_bytes);
         hasher.update([0x03]); // version
         let digest = hasher.finalize();
         let checksum = &digest[..2];
 
         let mut onion_bytes = Vec::with_capacity(35);
-        onion_bytes.extend_from_slice(&pk);
+        onion_bytes.extend_from_slice(&public_key_bytes);
         onion_bytes.extend_from_slice(checksum);
         onion_bytes.push(0x03);
 
@@ -99,5 +98,4 @@ impl Identity {
         println!("Node ID (hex string): {}", hex::encode(self.node_id));
         println!("Address: {}.dn", self.get_address());
     }
-    
 }

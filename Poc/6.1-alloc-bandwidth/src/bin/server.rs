@@ -8,7 +8,9 @@ use tokio::net::TcpListener;
 use tokio::sync::{Mutex, mpsc, oneshot};
 use tokio::time::Instant;
 
-use alloc_bandwidth::bandwidth::{AUTH_BANDWIDTH, NODE_BANDWIDTH, NodeRate, NodeRateLimiter, TOTAL_BANDWIDTH_LIMITER, difficulty};
+use alloc_bandwidth::bandwidth::{
+    AUTH_BANDWIDTH, NODE_BANDWIDTH, NodeRate, NodeRateLimiter, TOTAL_BANDWIDTH_LIMITER, difficulty,
+};
 use alloc_bandwidth::pow;
 
 const DATA_ADDR: &str = "127.0.0.1:9977";
@@ -18,6 +20,10 @@ const BUFFER_SIZE: usize = 8192;
 type NodeID = IpAddr; // node are identified by their ip address
 
 type NodeHashMap = Arc<Mutex<HashMap<NodeID, Arc<Mutex<NodeRateLimiter>>>>>;
+// sent from a control connection handler to the RandomX VM thread to validate a
+// PoW solution: the requesting node's id, the challenge issued, the client's
+// solution, and a channel to send back whether the solution was valid.
+type PowValidationRequest = (NodeID, [u8; 16], [u8; 8], oneshot::Sender<bool>);
 
 // inspired from https://github.com/tokio-rs/tokio/blob/master/examples/echo-tcp.rs
 async fn data_thread(limiters: NodeHashMap) -> Result<(), Box<dyn Error>> {
@@ -78,7 +84,7 @@ async fn data_thread(limiters: NodeHashMap) -> Result<(), Box<dyn Error>> {
 }
 
 async fn control_thread(
-    tx: mpsc::Sender<(NodeID, [u8; 16], [u8; 8], oneshot::Sender<bool>)>,
+    tx: mpsc::Sender<PowValidationRequest>,
     limiters: NodeHashMap,
 ) -> Result<(), Box<dyn Error>> {
     let listener = TcpListener::bind(CONTROL_ADDR).await?;
@@ -113,16 +119,16 @@ async fn control_thread(
                             *limiter = NodeRateLimiter::auth();
                         }
                     } else {
-			// This is very bad for performance, obviously.
-			eprintln!(
-			    "Requested {} of bandwith from {} available.",
-			    AUTH_BANDWIDTH,
-			    {
-				let node = TOTAL_BANDWIDTH_LIMITER.lock().await;
-				NODE_BANDWIDTH as isize - (node.max() - node.balance()) as isize
-			    }
-			);
-		    }
+                        // This is very bad for performance, obviously.
+                        eprintln!(
+                            "Requested {} of bandwith from {} available.",
+                            AUTH_BANDWIDTH,
+                            {
+                                let node = TOTAL_BANDWIDTH_LIMITER.lock().await;
+                                NODE_BANDWIDTH as isize - (node.max() - node.balance()) as isize
+                            }
+                        );
+                    }
                 }
                 NodeRate::Auth(..) => (),
             }
@@ -133,7 +139,7 @@ async fn control_thread(
 #[tokio::main]
 async fn main() {
     let limiters: NodeHashMap = Arc::new(Mutex::new(HashMap::new()));
-    let (tx, mut rx) = mpsc::channel::<(IpAddr, [u8; 16], [u8; 8], oneshot::Sender<bool>)>(4096);
+    let (tx, mut rx) = mpsc::channel::<PowValidationRequest>(4096);
 
     let vm_thread = thread::spawn(move || {
         let vm = pow::create_vm().unwrap();

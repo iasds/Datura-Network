@@ -19,11 +19,11 @@ fn create_challenge(difficulty: u8) -> [u8; 16] {
 }
 
 fn validate_solution(vm: &RandomXVM, challenge: [u8; 16], solution: u64) -> bool {
-    let mut cat = [0u8; 24];
-    cat[..16].copy_from_slice(&challenge);
-    cat[16..].copy_from_slice(&solution.to_le_bytes());
+    let mut seed = [0u8; 24];
+    seed[..16].copy_from_slice(&challenge);
+    seed[16..].copy_from_slice(&solution.to_le_bytes());
 
-    let hash = vm.calculate_hash(&cat).unwrap();
+    let hash = vm.calculate_hash(&seed).unwrap();
     let hash_u128 = u128::from_le_bytes(hash[0..16].try_into().unwrap())
         ^ u128::from_le_bytes(hash[16..32].try_into().unwrap());
 
@@ -46,17 +46,16 @@ fn solve_challenge(vm: &RandomXVM, challenge: [u8; 16]) -> u64 {
 fn main() {
     /*
      * got challenge JobData { blob: "1010ebc2beca060def36c3eb9b1f32cb8e26e8880cdee27124c52800e8e984087579aaba8b10d8000000d2ad79456f7b9a22de7b63085297d19502d8d406720b3761047071e82878fb9d0933", job_id: "7", target: "37860000", algo: "rx/0", height: 3574527, seed_hash: "491c63749eea49f1c01ce7dc29934437ea725b41fcd13c5456433156225f17c8" }
-*/
-    let test_blob = b"1010ebc2beca060def36c3eb9b1f32cb8e26e8880cdee27124c52800e8e984087579aaba8b10d8000000d2ad79456f7b9a22de7b63085297d19502d8d406720b3761047071e82878fb9d0933";
+     */
+    let _test_blob = b"1010ebc2beca060def36c3eb9b1f32cb8e26e8880cdee27124c52800e8e984087579aaba8b10d8000000d2ad79456f7b9a22de7b63085297d19502d8d406720b3761047071e82878fb9d0933";
     let seed_hash = b"491c63749eea49f1c01ce7dc29934437ea725b41fcd13c5456433156225f17c8";
 
-    let cache = RandomXCache::new(RandomXFlag::FLAG_DEFAULT, &seed_hash).unwrap();
-    let vm = RandomXVM::new(flags, Some(cache), None).unwrap()
+    let cache = RandomXCache::new(RandomXFlag::FLAG_DEFAULT, seed_hash).unwrap();
 
     let now = std::time::Instant::now();
 
     let vm = if env::args().len() > 1 {
-        RandomXVM::new(flags, Some(cache), None).unwrap()
+        RandomXVM::new(RandomXFlag::FLAG_DEFAULT, Some(cache), None).unwrap()
     } else {
         println!("initializing dataset (only needs to be done once, at node startup)...");
         let dataset = RandomXDataset::new(RandomXFlag::FLAG_DEFAULT, cache, 0).unwrap();
@@ -70,9 +69,9 @@ fn main() {
         .unwrap()
     };
 
-    for d in 0..15 {
-        let challenge = create_challenge(d);
-        println!("created challenge of difficulty {}", d);
+    for difficulty in 0..15 {
+        let challenge = create_challenge(difficulty);
+        println!("created challenge of difficulty {}", difficulty);
 
         let now = std::time::Instant::now();
         println!("solving challenge {:02X?}", challenge);

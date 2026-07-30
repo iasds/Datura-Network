@@ -13,10 +13,9 @@
 ///   PAYLOAD_LEN bytes after encryption (no size expansion).  Each call to
 ///   apply_fwd/apply_bwd advances the keystream counter by PAYLOAD_LEN bytes,
 ///   keeping both sides of the channel in sync across multiple cells.
-
 use chacha20::{
-    cipher::{KeyIvInit, StreamCipher},
     ChaCha20,
+    cipher::{KeyIvInit, StreamCipher},
 };
 use hkdf::Hkdf;
 use sha2::Sha256;

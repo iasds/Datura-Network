@@ -1,9 +1,6 @@
 use crate::identity::NodeId;
 use serde::{Deserialize, Serialize};
-use std::{
-    collections::VecDeque,
-    net::SocketAddr,
-};
+use std::{collections::VecDeque, net::SocketAddr};
 
 /// A small cap per bucket keeps the routing table from growing into a swamp of stale nodes.
 pub const K: usize = 20;
@@ -11,7 +8,7 @@ pub const K: usize = 20;
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
 pub struct Peer {
     pub id: NodeId,
-    pub addr: SocketAddr,
+    pub address: SocketAddr,
 }
 
 /// A bucket holds peers that are roughly the same distance away from a node.
@@ -28,11 +25,12 @@ impl KBucket {
     }
 
     pub fn insert(&mut self, peer: Peer) {
-
-        if let Some(pos) =
-            self.peers.iter().position(|p| p.id == peer.id)
+        if let Some(existing_position) = self
+            .peers
+            .iter()
+            .position(|existing_peer| existing_peer.id == peer.id)
         {
-            self.peers.remove(pos);
+            self.peers.remove(existing_position);
             self.peers.push_back(peer);
             return;
         }
@@ -49,16 +47,13 @@ impl KBucket {
 
 /// The routing table is the node's local map of the network.
 pub struct RoutingTable {
-
     local_peer: Peer,
 
     buckets: Vec<KBucket>,
 }
 
 impl RoutingTable {
-
     pub fn new() -> Self {
-
         let mut buckets = Vec::with_capacity(256);
 
         for _ in 0..256 {
@@ -68,7 +63,7 @@ impl RoutingTable {
         Self {
             local_peer: Peer {
                 id: [0u8; 32],
-                addr: std::net::SocketAddr::from(([0, 0, 0, 0], 0)),
+                address: std::net::SocketAddr::from(([0, 0, 0, 0], 0)),
             },
             buckets,
         }
@@ -76,82 +71,57 @@ impl RoutingTable {
 
     /// Set the node's own identity once the process has a real local peer to represent.
     /// MUST be called after new()
-    pub fn set_local_peer(
-        &mut self,
-        peer: Peer,
-    ) {
+    pub fn set_local_peer(&mut self, peer: Peer) {
         self.local_peer = peer;
-        let bucket =
-            bucket_index(
-                &self.local_peer.id,
-                &self.local_peer.id,
-            );
+        let bucket_position = bucket_index(&self.local_peer.id, &self.local_peer.id);
 
-        self.buckets[bucket]
-            .insert(self.local_peer.clone());
+        self.buckets[bucket_position].insert(self.local_peer.clone());
     }
 
     /// Remember a newly discovered peer by placing it in the bucket that matches its distance.
-    pub fn add_peer(
-        &mut self,
-        peer: Peer,
-    ) {
-
+    pub fn add_peer(&mut self, peer: Peer) {
         if peer.id == self.local_peer.id {
             return;
         }
 
-        let bucket =
-            bucket_index(
-                &self.local_peer.id,
-                &peer.id,
-            );
+        let bucket_position = bucket_index(&self.local_peer.id, &peer.id);
 
-        self.buckets[bucket]
-            .insert(peer);
+        self.buckets[bucket_position].insert(peer);
     }
 
     fn consider_bucket(
         &self,
-        bucket_index: usize,
+        bucket_position: usize,
         target: &NodeId,
-        count: usize,
-        best: &mut Vec<Peer>,
+        result_count: usize,
+        best_peers: &mut Vec<Peer>,
     ) {
-
-        for peer in self.buckets[bucket_index].peers() {
-
+        for peer in self.buckets[bucket_position].peers() {
             // avoid duplicates
-            if best.iter().any(|p| p.id == peer.id) {
+            if best_peers.iter().any(|best_peer| best_peer.id == peer.id) {
                 continue;
             }
 
-            let distance =
-                xor_distance(&peer.id, target);
+            let distance = xor_distance(&peer.id, target);
 
             // Find insertion point.
-            let pos = best
-                .binary_search_by(|p| {
-                    xor_distance(&p.id, target)
-                        .cmp(&distance)
+            let insertion_index = best_peers
+                .binary_search_by(|candidate_peer| {
+                    xor_distance(&candidate_peer.id, target).cmp(&distance)
                 })
-                .unwrap_or_else(|e| e);
+                .unwrap_or_else(|index| index);
 
-            if pos < count {
+            if insertion_index < result_count {
+                best_peers.insert(insertion_index, peer.clone());
 
-                best.insert(pos, peer.clone());
-
-                if best.len() > count {
-                    best.pop();
+                if best_peers.len() > result_count {
+                    best_peers.pop();
                 }
+            } else if best_peers.len() < result_count {
+                best_peers.push(peer.clone());
 
-            } else if best.len() < count {
-
-                best.push(peer.clone());
-
-                best.sort_by(|a, b| {
-                    xor_distance(&a.id, target)
-                        .cmp(&xor_distance(&b.id, target))
+                best_peers.sort_by(|first_peer, second_peer| {
+                    xor_distance(&first_peer.id, target).cmp(&xor_distance(&second_peer.id, target))
                 });
             }
         }
@@ -159,94 +129,57 @@ impl RoutingTable {
 
     /// Return the peers that look best for a lookup toward the given target.
     /// The search expands outward from the most relevant bucket until
-    /// it has enough candidates (set by `count`).
-    pub fn closest(
-        &self,
-        target: NodeId,
-        count: usize,
-    ) -> Vec<Peer> {
+    /// it has enough candidates (set by `result_count`).
+    pub fn closest(&self, target: NodeId, result_count: usize) -> Vec<Peer> {
+        let center_bucket = bucket_index(&self.local_peer.id, &target);
 
-        let center =
-            bucket_index(
-                &self.local_peer.id,
-                &target,
-            );
-
-        let mut best: Vec<Peer> = Vec::with_capacity(count);
+        let mut best_peers: Vec<Peer> = Vec::with_capacity(result_count);
 
         for radius in 0..256 {
-
-
-            if let Some(index) = center.checked_sub(radius) {
-                self.consider_bucket(
-                    index,
-                    &target,
-                    count,
-                    &mut best,
-                );
+            if let Some(lower_bucket) = center_bucket.checked_sub(radius) {
+                self.consider_bucket(lower_bucket, &target, result_count, &mut best_peers);
             }
 
             if radius != 0 {
+                let upper_bucket = center_bucket + radius;
 
-                let index = center + radius;
-
-                if index < 256 {
-                    self.consider_bucket(
-                        index,
-                        &target,
-                        count,
-                        &mut best,
-                    );
+                if upper_bucket < 256 {
+                    self.consider_bucket(upper_bucket, &target, result_count, &mut best_peers);
                 }
             }
         }
 
-        best
+        best_peers
     }
-
 }
 
 /// XOR distance compares how "close" two node IDs are.
-pub fn xor_distance(
-    a: &NodeId,
-    b: &NodeId,
-) -> [u8; 32] {
+pub fn xor_distance(first_id: &NodeId, second_id: &NodeId) -> [u8; 32] {
+    let mut distance = [0u8; 32];
 
-    let mut out = [0u8; 32];
-
-    for i in 0..32 {
-        out[i] = a[i] ^ b[i];
+    for byte_index in 0..32 {
+        distance[byte_index] = first_id[byte_index] ^ second_id[byte_index];
     }
 
-    out
+    distance
 }
 
 /// Map a node ID to the bucket that should hold it.
 /// The bucket index reflects how far the a peer is from the local node in XOR space.
 /// 0 means farthest and 255 means the same node (closest possible).
-pub fn bucket_index(
-    local: &NodeId,
-    remote: &NodeId,
-) -> usize {
+pub fn bucket_index(local: &NodeId, remote: &NodeId) -> usize {
+    let distance = xor_distance(local, remote);
 
-    let distance =
-        xor_distance(local, remote);
-
-    for (byte_index, byte)
-        in distance.iter().enumerate()
-    {
-
+    for (byte_index, byte) in distance.iter().enumerate() {
         if *byte == 0 {
             continue;
         }
 
-        let leading =
-            byte.leading_zeros() as usize;
+        let leading_zero_bits = byte.leading_zeros() as usize;
 
-        let bit =
-            byte_index * 8 + leading;
+        let bit_position = byte_index * 8 + leading_zero_bits;
 
-        return 255 - bit;
+        return 255 - bit_position;
     }
 
     // Same node.

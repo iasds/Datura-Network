@@ -28,7 +28,6 @@ fn main() {
         match std::net::TcpStream::connect(format!("127.0.0.1:{}", port)) {
             Err(e) => {
                 println!("failed to connect to server at 127.0.0.1:{}: {}", port, e);
-                return;
             }
 
             Ok(mut stream) => {
@@ -39,7 +38,6 @@ fn main() {
                 match stream.read_exact(&mut server_public_key) {
                     Err(e) => {
                         println!("failed to read key from server: {}", e);
-                        return;
                     }
 
                     Ok(_) => {

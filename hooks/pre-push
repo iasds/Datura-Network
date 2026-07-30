@@ -1,0 +1,53 @@
+#!/bin/sh
+
+# Strip LD_PRELOAD before running any cargo command: on Whonix, git itself
+# is wrapped (uwtwrapper) and injects LD_PRELOAD=libtorsocks.so into every
+# subprocess it spawns, including this hook script. That env var propagates
+# to cargo clippy/clippy-driver, which deadlocks under it. This script is
+# already a child of the (possibly wrapped) git process by the time it
+# runs, so unsetting it here breaks the inheritance chain before clippy
+# ever spawns.
+unset LD_PRELOAD
+
+# Pre-push hook: runs cargo fmt/clippy/test on every crate in the repo
+# (not just the ones touched by this push).
+set -e
+
+repo_root=$(git rev-parse --show-toplevel)
+cd "$repo_root"
+
+# Discover every crate in the repo (any directory with a Cargo.toml,
+# excluding build output), regardless of what actually changed in this push.
+crates=$(find "$repo_root" -name Cargo.toml -not -path '*/target/*' -not -path '*/.claude/*' -not -path '*/.git/*' -exec dirname {} \; | sort -u)
+
+if [ -z "$crates" ]; then
+  exit 0
+fi
+
+status=0
+
+for crate_dir in $crates; do
+  echo "== checking $crate_dir =="
+
+  fmt_out=$(cargo fmt --manifest-path "$crate_dir/Cargo.toml" --check 2>&1); fmt_rc=$?
+  clippy_out=$(cargo clippy --manifest-path "$crate_dir/Cargo.toml" --all-targets -- -D warnings 2>&1); clippy_rc=$?
+  test_out=$(cargo test --manifest-path "$crate_dir/Cargo.toml" 2>&1); test_rc=$?
+
+  if [ $fmt_rc -ne 0 ]; then
+    status=1
+    echo "FAILED: cargo fmt --check in $crate_dir"
+    printf '%s\n' "$fmt_out"
+  fi
+  if [ $clippy_rc -ne 0 ]; then
+    status=1
+    echo "FAILED: cargo clippy in $crate_dir"
+    printf '%s\n' "$clippy_out"
+  fi
+  if [ $test_rc -ne 0 ]; then
+    status=1
+    echo "FAILED: cargo test in $crate_dir"
+    printf '%s\n' "$test_out"
+  fi
+done
+
+exit $status

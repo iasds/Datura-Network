@@ -18,7 +18,7 @@ pub struct Destination {
 pub struct PacketSeen {
     pub slot: usize,
     pub wire_tag: String, // blake3 of raw bytes, first 8 hex
-    pub opened: bool, // true -> decrypted, false -> discarded as decoy
+    pub opened: bool,     // true -> decrypted, false -> discarded as decoy
 }
 
 // tag = first 8 hex of blake3, enough for check, but short too

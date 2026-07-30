@@ -4,7 +4,10 @@ use std::{
 };
 
 use crate::{
-    client, identity::NodeId, routing::{self, Peer, RoutingTable}, rpc::Message,
+    client,
+    identity::NodeId,
+    routing::{self, Peer, RoutingTable},
+    rpc::Message,
 };
 
 /// A simple Kademlia implementation, good enough for a PoC, but not production.
@@ -14,185 +17,111 @@ pub async fn find_node(
     routing: Arc<Mutex<RoutingTable>>,
     bootstrap: Peer,
     target: NodeId,
-    k: usize,
+    result_count: usize,
 ) -> Vec<Peer> {
-
     // Keep track of every peer we have seen so far, using the node ID as the lookup key.
     // This lets the search avoid repeatedly asking the same node and makes the nearest-peer
     // selection deterministic enough to be useful.
-    let mut known: HashMap<NodeId, Peer> =
-        HashMap::new();
+    let mut known_peers: HashMap<NodeId, Peer> = HashMap::new();
 
-    known.insert(
-        bootstrap.id,
-        bootstrap.clone(),
-    );
+    known_peers.insert(bootstrap.id, bootstrap.clone());
 
     // Once a peer has been queried, we do not want to keep hammering it for the same lookup.
-    let mut queried =
-        HashSet::<NodeId>::new();
+    let mut queried_peer_ids = HashSet::<NodeId>::new();
 
-    let mut previous_best: Option<[u8;32]> = None;
+    let mut previous_best_distance: Option<[u8; 32]> = None;
 
     loop {
         // Pick the closest peer we have not asked yet. That keeps the search focused on the
         // part of the network that matters instead of wandering blindly.
+        let next_peer = nearest_unqueried(&known_peers, &queried_peer_ids, &target);
 
-        let next =
-            nearest_unqueried(
-                &known,
-                &queried,
-                &target,
-            );
-
-        let Some(peer) = next else {
+        let Some(peer) = next_peer else {
             break;
         };
 
-        queried.insert(peer.id);
+        queried_peer_ids.insert(peer.id);
 
-        let reply =
-            client::rpc(
-                &mut routing.lock().unwrap(),
-                &peer.addr.to_string(),
-                Message::FindNode {
-                    target,
-                },
-            )
-            .await;
+        // The routing table lock is intentionally not held across this `.await`: `client::rpc`
+        // takes the shared handle and only locks briefly, internally, once the reply arrives.
+        let reply = client::rpc(
+            &routing,
+            &peer.address.to_string(),
+            Message::FindNode { target },
+        )
+        .await;
 
-        let Some(
-            Message::Nodes { peers }
-        ) = reply else {
+        let Some(Message::Nodes {
+            peers: discovered_peers,
+        }) = reply
+        else {
             continue;
         };
 
-        let mut discovered = false;
+        let mut found_new_peer = false;
 
         {
-            let mut rt =
-                routing.lock().unwrap();
+            let mut routing_table = routing.lock().unwrap();
 
-            for p in peers {
-
-                if !known.contains_key(&p.id) {
-
-                    rt.add_peer(p.clone());
-
-                    known.insert(
-                        p.id,
-                        p,
-                    );
-
-                    discovered = true;
+            for discovered_peer in discovered_peers {
+                if let std::collections::hash_map::Entry::Vacant(entry) =
+                    known_peers.entry(discovered_peer.id)
+                {
+                    routing_table.add_peer(discovered_peer.clone());
+                    entry.insert(discovered_peer);
+                    found_new_peer = true;
                 }
             }
         }
 
         // If the latest round brought in fresh peers, we should keep going; otherwise the
         // search has likely reached the edge of what this neighborhood can tell us.
-        let best =
-            known
-                .values()
-                .min_by(|a,b|{
+        let closest_known_peer = known_peers
+            .values()
+            .min_by(|first, second| {
+                routing::xor_distance(&first.id, &target)
+                    .cmp(&routing::xor_distance(&second.id, &target))
+            })
+            .unwrap();
 
-                    routing::xor_distance(
-                        &a.id,
-                        &target,
-                    )
-                    .cmp(
-                        &routing::xor_distance(
-                            &b.id,
-                            &target,
-                        )
-                    )
+        let closest_known_distance = routing::xor_distance(&closest_known_peer.id, &target);
 
-                })
-                .unwrap();
-
-        let best_distance =
-            routing::xor_distance(
-                &best.id,
-                &target,
-            );
-
-        if let Some(previous)
-            = previous_best
+        if let Some(previous_distance) = previous_best_distance
+            && closest_known_distance == previous_distance
+            && !found_new_peer
         {
-
-            if best_distance == previous
-                && !discovered
-            {
-                break;
-            }
+            break;
         }
 
-        previous_best =
-            Some(best_distance);
+        previous_best_distance = Some(closest_known_distance);
     }
 
     // By the time the loop finishes, we have a broad view of the nearby region and can return
     // the best K candidates.
-    let mut peers =
-        known
-        .into_values()
-        .collect::<Vec<_>>();
+    let mut peers = known_peers.into_values().collect::<Vec<_>>();
 
-    peers.sort_by(|a,b|{
-
-        routing::xor_distance(
-            &a.id,
-            &target,
-        )
-        .cmp(
-            &routing::xor_distance(
-                &b.id,
-                &target,
-            )
-        )
-
+    peers.sort_by(|first, second| {
+        routing::xor_distance(&first.id, &target).cmp(&routing::xor_distance(&second.id, &target))
     });
 
-    peers.truncate(k);
+    peers.truncate(result_count);
 
     peers
 }
 
 /// Chooses the unqueried peer that is currently closest to the target.
-/// This is the small piece of logic used in `find_node` function 
+/// This is the small piece of logic used in `find_node` function
 /// that keeps the lookup converging toward the right part of the network.
 fn nearest_unqueried(
-
-    known: &HashMap<NodeId,Peer>,
-
-    queried: &HashSet<NodeId>,
-
+    known_peers: &HashMap<NodeId, Peer>,
+    queried_peer_ids: &HashSet<NodeId>,
     target: &NodeId,
-
 ) -> Option<Peer> {
-
-    known
+    known_peers
         .values()
-        .filter(|p|{
-
-            !queried.contains(
-                &p.id
-            )
-
-        })
-        .min_by(|a,b|{
-
-            routing::xor_distance(
-                &a.id,
-                target,
-            )
-            .cmp(
-                &routing::xor_distance(
-                    &b.id,
-                    target,
-                )
-            )
-
+        .filter(|peer| !queried_peer_ids.contains(&peer.id))
+        .min_by(|first, second| {
+            routing::xor_distance(&first.id, target).cmp(&routing::xor_distance(&second.id, target))
         })
         .cloned()
 }

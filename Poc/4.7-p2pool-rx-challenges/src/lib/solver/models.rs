@@ -131,6 +131,6 @@ prop_compose! {
 proptest! {
     #[test]
     fn test_get_nonce(pow in arb_datura_pow()) {
-        assert!(pow.get_nonce() != "".to_string());
+        assert!(pow.get_nonce() != "");
     }
 }

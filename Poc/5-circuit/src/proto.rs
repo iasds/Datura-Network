@@ -14,23 +14,22 @@
 ///   INTRO      – HS → intro:     hidden service registers with the intro point
 ///   RENDEZVOUS – intro → HS:     intro forwards client's RV info; payload = [addr_len:1][rv_addr:N][circuit_id:4 LE]
 ///   CONNECT    – client → intro: request HS connection; payload = [addr_len:1][rv_addr:N][circuit_id:4 LE]
-
 use std::io::{Read, Write};
 use std::net::TcpStream;
 
 pub const CELL_LEN: usize = 512;
 pub const PAYLOAD_LEN: usize = CELL_LEN - 5; // 507 bytes
 
-pub const TYPE_CREATE:     u8 = 0x01;
-pub const TYPE_CREATED:    u8 = 0x02;
-pub const TYPE_EXTEND:     u8 = 0x03;
-pub const TYPE_EXTENDED:   u8 = 0x04;
-pub const TYPE_RELAY:      u8 = 0x05;
-pub const TYPE_DATA:       u8 = 0x06;
-pub const TYPE_BRIDGE:     u8 = 0x07;
-pub const TYPE_INTRO:      u8 = 0x08;
+pub const TYPE_CREATE: u8 = 0x01;
+pub const TYPE_CREATED: u8 = 0x02;
+pub const TYPE_EXTEND: u8 = 0x03;
+pub const TYPE_EXTENDED: u8 = 0x04;
+pub const TYPE_RELAY: u8 = 0x05;
+pub const TYPE_DATA: u8 = 0x06;
+pub const TYPE_BRIDGE: u8 = 0x07;
+pub const TYPE_INTRO: u8 = 0x08;
 pub const TYPE_RENDEZVOUS: u8 = 0x09;
-pub const TYPE_CONNECT:    u8 = 0x0A;
+pub const TYPE_CONNECT: u8 = 0x0A;
 
 #[derive(Clone)]
 pub struct Cell {
@@ -41,7 +40,11 @@ pub struct Cell {
 
 impl Cell {
     pub fn new(cell_type: u8, circuit_id: u32) -> Self {
-        Self { cell_type, circuit_id, payload: [0u8; PAYLOAD_LEN] }
+        Self {
+            cell_type,
+            circuit_id,
+            payload: [0u8; PAYLOAD_LEN],
+        }
     }
 
     pub fn to_bytes(&self) -> [u8; CELL_LEN] {

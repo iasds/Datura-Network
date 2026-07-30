@@ -194,6 +194,15 @@ impl Worker {
                         self.job_results
                             .blocking_send(SolverResult::Valid((best_solution.0, best_solution.1)))
                             .unwrap();
+                    } else {
+                        //deadline elapsed without finding a qualifying nonce. Report it
+                        //instead of silently dropping the job, otherwise any caller
+                        //awaiting a result hangs forever.
+                        self.job_results
+                            .blocking_send(SolverResult::Error(SolverError::TimeoutError(
+                                "solve job timed out before finding a qualifying nonce".to_string(),
+                            )))
+                            .unwrap();
                     }
                 }
             }

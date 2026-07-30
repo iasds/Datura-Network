@@ -205,9 +205,26 @@ impl Solver {
 
         while let Some(solverjob) = solver_input.recv().await {
             match solverjob {
-                SolverJob::Verify((_, _, deadline)) => {
+                SolverJob::Verify((ref pow, _, deadline)) => {
                     //verification job, only one thread required
                     //always give work to the worker who has been working the longest (round robin)
+                    if deadline <= (Instant::now() + VERIFY_USUAL_DURATION).into() {
+                        //deadline already elapsed (or about to) before this job was even
+                        //dispatched to a worker (e.g. solver setup such as RandomXCache::new
+                        //took longer than POW_MAX_LIFETIME). Report it instead of silently
+                        //dropping the job, otherwise any caller awaiting a result hangs forever.
+                        println!("verify job expired before dispatch, discarding");
+                        this.worker_output_sender
+                            .send(SolverResult::Invalid((
+                                pow.clone(),
+                                SolverError::TimeoutError(
+                                    "verify job expired before dispatch to a worker".to_string(),
+                                ),
+                            )))
+                            .await
+                            .unwrap();
+                        continue;
+                    }
                     while deadline > (Instant::now() + VERIFY_USUAL_DURATION).into() {
                         if let Some(work_allocation) =
                             w_chans.iter().find(|w| w.available.load(Ordering::Acquire))
@@ -224,7 +241,21 @@ impl Solver {
                         sleep(VERIFY_USUAL_DURATION).await;
                     }
                 }
-                SolverJob::Solve((_, deadline)) => {
+                SolverJob::Solve((ref _pow, deadline)) => {
+                    if deadline <= (Instant::now() + VERIFY_USUAL_DURATION).into() {
+                        //deadline already elapsed (or about to) before this job was even
+                        //dispatched to a worker (e.g. solver setup such as RandomXCache::new
+                        //took longer than POW_MAX_LIFETIME). Report it instead of silently
+                        //dropping the job, otherwise any caller awaiting a result hangs forever.
+                        println!("solve job expired before dispatch, discarding");
+                        this.worker_output_sender
+                            .send(SolverResult::Error(SolverError::TimeoutError(
+                                "solve job expired before dispatch to a worker".to_string(),
+                            )))
+                            .await
+                            .unwrap();
+                        continue;
+                    }
                     while deadline > (Instant::now() + VERIFY_USUAL_DURATION).into() {
                         if w_chans
                             .iter()

@@ -3,7 +3,7 @@ use std::net::TcpStream;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
-use x_wing::{DecapsulationKey, Decapsulator, EncapsulationKey, KeyExport, Kem, XWingKem};
+use x_wing::{DecapsulationKey, Decapsulator, EncapsulationKey, Kem, KeyExport, XWingKem};
 
 use crate::envelope::{self, PACKET_SIZE};
 use crate::node::wire_tag;
@@ -11,11 +11,12 @@ use crate::node::wire_tag;
 pub const DECOY_COUNT: usize = 8; //1 real + 7 decoy
 // theoretically, could be advanced setting to increase, but min 8?
 
-// prod: decoy node's hashring position = Poseidon(pallas_pk.x, pallas_pk.y) (apparently, kinda a wacky system, but makes sense for security), 
+// prod: decoy node's hashring position = Poseidon(pallas_pk.x, pallas_pk.y) (apparently, kinda a wacky system, but makes sense for security),
 // rn its the blake3 of the node's xwing public key
 pub type NodeId = [u8; 32];
 
-pub fn node_id(public_key: &EncapsulationKey) -> NodeId { // makes the addr/id from xwing encap key
+// makes the addr/id from xwing encap key
+pub fn node_id(public_key: &EncapsulationKey) -> NodeId {
     *blake3::hash(public_key.to_bytes().as_slice()).as_bytes()
 }
 
@@ -42,12 +43,14 @@ fn decoy_set_path() -> PathBuf {
     crate_file("hs_decoy_set.txt")
 }
 
-/// 
+// loads the hs key + decoy set off disk, making either one if its not there yet.
+// real slot is never stored, its found by matching own id inside the set
 pub fn load_or_make_hidden_service() -> Result<HiddenService> {
     let id_path = hs_identity_path(); // both separate fns for clarity
     let set_path = decoy_set_path();
 
-    let identity = if id_path.exists() { //check file, or regen
+    //check file, or regen
+    let identity = if id_path.exists() {
         load_identity(&id_path).context("reloading hs identity")?
     } else {
         let (secret, _) = XWingKem::generate_keypair();
@@ -56,7 +59,8 @@ pub fn load_or_make_hidden_service() -> Result<HiddenService> {
     };
     let self_id = node_id(identity.encapsulation_key()); // own id is identity generated into file as hs id
 
-    let members = if set_path.exists() { //same check
+    //same check
+    let members = if set_path.exists() {
         read_member_set(&set_path).context("reloading decoys")?
     } else {
         let members = make_member_set(self_id)?;
@@ -93,7 +97,7 @@ pub(crate) fn make_hidden_service() -> Result<HiddenService> {
     })
 }
 
-// Put own id at random slot and fill the other 7 with ids of decoys selected. 
+// Put own id at random slot and fill the other 7 with ids of decoys selected.
 // decoy nodes' secret keys not generated or stored
 fn make_member_set(self_id: NodeId) -> Result<Vec<NodeId>> {
     // random byte picks the real slot. mod 8 doesnt skew -> 256%8=0 (256 vals / 8 buckets = 32 each)
@@ -102,7 +106,8 @@ fn make_member_set(self_id: NodeId) -> Result<Vec<NodeId>> {
     let real_slot = (slot_pick[0] as usize) % DECOY_COUNT; //set slot to rand mod count
 
     let mut members = Vec::with_capacity(DECOY_COUNT); // decoy 'member' to max 
-    for slot in 0..DECOY_COUNT { //fill all slots
+    //fill all slots
+    for slot in 0..DECOY_COUNT {
         if slot == real_slot {
             members.push(self_id);
         } else {
@@ -125,13 +130,15 @@ fn load_identity(path: &Path) -> Result<DecapsulationKey> {
     Ok(DecapsulationKey::from(seed))
 }
 
-fn save_identity(path: &Path, secret: &DecapsulationKey) -> Result<()> { //save hs key separetly
+//save hs key separetly
+fn save_identity(path: &Path, secret: &DecapsulationKey) -> Result<()> {
     fs::write(path, hex::encode(secret.as_bytes())).context("writing hs identity")?;
     // hidden service's key is a secret, ensure in implement to lock it down
     Ok(())
 }
 
-fn write_member_set(path: &Path, members: &[NodeId]) -> Result<()> { //create decoy file with chosen members from public addr
+//create decoy file with chosen members from public addr
+fn write_member_set(path: &Path, members: &[NodeId]) -> Result<()> {
     let mut serialized = String::new();
     for id in members {
         serialized.push_str(&hex::encode(id));
@@ -153,7 +160,8 @@ fn read_member_set(path: &Path) -> Result<Vec<NodeId>> {
             .context("node id not 32 bytes")?;
         members.push(id);
     }
-    if members.len() != DECOY_COUNT {//verify 8 total
+    //verify 8 total
+    if members.len() != DECOY_COUNT {
         bail!(
             "decoy set has {} entries, expected {}",
             members.len(),

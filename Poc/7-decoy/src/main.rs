@@ -1,6 +1,6 @@
 //! poc7, decoy destinations (module doc comment as required by contrib guideliness)
-//! client seals one packet to a hidden service and fans out copies to the hs's fixed set 
-//! of 8 dests (1 real + 7 decoys). only the real dest can open it (x-wing + chacha20poly1305); 
+//! client seals one packet to a hidden service and fans out copies to the hs's fixed set
+//! of 8 dests (1 real + 7 decoys). only the real dest can open it (x-wing + chacha20poly1305);
 //! the other 7 get noise. every client uses the same 8, so a gpa sees 8 co-receivers instead of 1. a 1/8 anon set
 
 //! see spec/specification.md "Decoy Destinations and Sources"
@@ -29,8 +29,8 @@ const CLIENT_COUNT: usize = 4;
 struct Demo {
     real_slot: usize,
     members: Vec<fanout::NodeId>, // the fixed public decoy set (8 node ids)
-    sent: Vec<(usize, String)>, // (client idx, wire tag)
-    seen: Vec<PacketSeen>, // one per client per dest
+    sent: Vec<(usize, String)>,   // (client idx, wire tag)
+    seen: Vec<PacketSeen>,        // one per client per dest
 }
 
 fn main() -> Result<()> {
@@ -40,7 +40,7 @@ fn main() -> Result<()> {
     report(&demo)
 }
 
-// takes a hidden service (key + the public decoy set), spins nodes, runs `client_count` clients, returns what the dests saw. 
+// takes a hidden service (key + the public decoy set), spins nodes, runs `client_count` clients, returns what the dests saw.
 // main feeds to persisted hs, tests feed temp in-mem
 fn run_fanout(hs: HiddenService, client_count: usize) -> Result<Demo> {
     // grab the real slot + hs pubkey before the identity key moves into a thread
@@ -55,14 +55,15 @@ fn run_fanout(hs: HiddenService, client_count: usize) -> Result<Demo> {
     let (report_tx, report_rx) = mpsc::channel::<PacketSeen>();
     let mut workers = Vec::new();
 
-    // bind & spawn 8 dests, each expects 1 pkt per client. the real slot runs hs with key; decoys are independant nodes, gets its own key and fails to open 
+    // bind & spawn 8 dests, each expects 1 pkt per client. the real slot runs hs with key; decoys are independant nodes, gets its own key and fails to open
     // hs-sealed traffic. decoy keys not persisted & not part of hs data
     let mut dest_ports = Vec::with_capacity(DECOY_COUNT); //8
     for slot in 0..DECOY_COUNT {
         let listener = TcpListener::bind(("127.0.0.1", 0)).context("bind dest")?;
         dest_ports.push(listener.local_addr()?.port());
 
-        let secret = if slot == real_slot { // set to hs id if slot correct
+        // set to hs id if slot correct
+        let secret = if slot == real_slot {
             hs_identity.take().expect("real slot assigned once")
         } else {
             let (throwaway, _) = XWingKem::generate_keypair(); // otherwise decoy gets its own unrelated key
@@ -79,7 +80,8 @@ fn run_fanout(hs: HiddenService, client_count: usize) -> Result<Demo> {
     // spread 8 dests over 6 routers
     // uneven on purpose: 8 dests don't divide evenly over 6 routers, so routers 0 and 1 cover 2 dest slots each (0&6, 1&7) while the rest cover 1.
     let mut router_fanout: Vec<Vec<u16>> = vec![Vec::new(); ROUTER_COUNT];
-    for (slot, port) in dest_ports.iter().enumerate() { //for 8 nodes: index of node, rand port
+    //for 8 nodes: index of node, rand port
+    for (slot, port) in dest_ports.iter().enumerate() {
         router_fanout[slot % ROUTER_COUNT].push(*port); // router = slot index modulo the amt of routers (slot%6), not an even split
     }
 
@@ -114,7 +116,8 @@ fn run_fanout(hs: HiddenService, client_count: usize) -> Result<Demo> {
         let _ = worker.join();
     }
 
-    Ok(Demo { // results
+    // results
+    Ok(Demo {
         real_slot,
         members,
         sent,
@@ -160,8 +163,13 @@ fn report(demo: &Demo) -> Result<()> {
             opener
         );
 
-        if reached.len() != DECOY_COUNT { // still 8
-            bail!("client {client} only reached {}/{} slots", reached.len(), DECOY_COUNT);
+        // still 8
+        if reached.len() != DECOY_COUNT {
+            bail!(
+                "client {client} only reached {}/{} slots",
+                reached.len(),
+                DECOY_COUNT
+            );
         }
     }
 
@@ -190,9 +198,8 @@ fn report(demo: &Demo) -> Result<()> {
         }
     }
 
-    println!( // note: a gpa running many clients sees 8 receivers not 1 -> anonymity at 1/8 (unless decoy compromised, then 1/8-k)
-        "\nok: all {client_count} clients fanned out to the same {DECOY_COUNT} nodes."
-    );
+    // note: a gpa running many clients sees 8 receivers not 1 -> anonymity at 1/8 (unless decoy compromised, then 1/8-k)
+    println!("\nok: all {client_count} clients fanned out to the same {DECOY_COUNT} nodes.");
     Ok(())
 }
 
@@ -224,7 +231,8 @@ mod tests {
 
         // only the real slot ever opened, and it opened all `clients` pkts
         for slot in 0..DECOY_COUNT {
-            let slot_packets: Vec<&PacketSeen> = demo.seen.iter().filter(|p| p.slot == slot).collect();
+            let slot_packets: Vec<&PacketSeen> =
+                demo.seen.iter().filter(|p| p.slot == slot).collect();
             let opened = slot_packets.iter().filter(|p| p.opened).count();
             assert_eq!(slot_packets.len(), clients, "slot {slot} wrong recv count");
             let want = if slot == demo.real_slot { clients } else { 0 };

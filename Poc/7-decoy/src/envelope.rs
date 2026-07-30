@@ -12,7 +12,7 @@ const NONCE_END: usize = CT_END + 12;
 const TAG_SIZE: usize = 16; // ChaCha20Poly1305 auth tag
 
 // the inner plaintext is a fixed block: two le bytes holding the real length, then payload, then zeros padding it out to INNER_SIZE
-// encrypted whole, so the true payload length lives in the AEAD and never shows up as plaintext 
+// encrypted whole, so the true payload length lives in the AEAD and never shows up as plaintext
 // (plaintext length would let gpa read payload size despite uniform packet size).
 const INNER_SIZE: usize = PACKET_SIZE - NONCE_END - TAG_SIZE;
 const LEN_PREFIX: usize = 2;

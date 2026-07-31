@@ -10,14 +10,23 @@ The decoy set is just 8 public node addrs (`hs_decoy_set.txt`). real hs plus 7 i
 
 ## topology
 
-18 nodes on localhost: 6 routers + 8 destinations run as their own threads (14 total), the 4 clients run in main's thread:
+18 nodes on localhost: 6 relays (2 then 4) + 8 destinations run as their own threads (14 total), the 4 clients run in main's thread.
+
+every node copies to 2, 8 leaves needs 2 relay levels above them and the real path is 3 hops. same as image-12 in the spec:
 
 ```
-4 clients to 6 routers to 8 destinations (1 real + 7 decoy)
+                       hop2 0 --> dest 0, dest 1
+           hop1 0 -->
+                       hop2 1 --> dest 2, dest 3
+client -->
+                       hop2 2 --> dest 4, dest 5
+           hop1 1 -->
+                       hop2 3 --> dest 6, dest 7
 ```
 
-- clients each seal their own packet to the hs public key and push the same bytes into the router layer, one client after another in main. a client only knows the hs pubkey, it never sees the decoy set.
-- routers are blind relays. They just copy the packet onward.
+- clients each seal their own packet to the hs public key and push the same bytes into the 2 entry relays, one client after another in main. a client only knows the hs pubkey, it never sees the decoy set or the tree.
+- relays are blind. they copy onward and never decrypt, same code at both levels: a relay can't see if 2 hops are relays or the destination. Intermediate nodes forward and the leaves/decoys can't open anything
+- split is contiguous, hop2 j to dests 2j and 2j+1, hop1 k to hop2 relays 2k and 2k+1. the hs' real slot decides real branch
 - dests each try to open the packet. only the real one succeeds.
 - multiple clients so you can see they all fan out to the same fixed 8.
 
@@ -41,15 +50,18 @@ cargo test
 
 ## output
 
-per client: which of the 8 slots saw its packet, opened only by the real slot. per slot: got one packet from every client, only the real slot ever opened any. so every client fanned out to the same 8
+per client: the packet's tag turns up at 2 hop1 relays and 4 hop2 relays then 8 decoy dest slots, only opened by the real one same bytes at all lvls show it followed decoys and route
+
+per relay: one packet in, 2 out. per slot: got one packet only the real slot ever opened any. so every client fanned out over 3 to the same 8
 
 ## not done in poc
 
 - no PoW on who gets to be a decoy
+- the hs owns the tree but main wires the relays up directly. the hs installing forwarding rules on them, paying for that. Out of scope
 - single machine, no real network / NAT stuff
 - 1/8 anon is theoretical: if a gpa runs some of the 7 decoys it knows those are fake and subtracts them (runs all 7 -> 1/1). so the real anon set = how many decoys the hs actually controls/trusts. basically, for security you should run your own decoy nodes, or at least like 2-4. (funnily though, multiple competing gpa's in network would help security, and fight against eachother)
 
 ---
 
-Written by hannahmoose (July 2026)
+Written by hannahmoose (July 2026), updated by hannahmoose (July 2026)
 XMR: 86iWxZqVjvhGVqPTD8Rh36LHa5zCn4ZgkQBsqfUUFod73mpUHVxxS1VYFMv9PscniaWA2aSLKrpPeEFJrcVjaTomR42679J

@@ -19,9 +19,13 @@ use anyhow::{Context, Result, bail};
 use x_wing::{Decapsulator, Kem, XWingKem};
 
 use fanout::{DECOY_COUNT, HiddenService};
-use node::{Destination, PacketSeen, run_destination, run_router};
+use node::{Destination, HopSeen, PacketSeen, Relay, run_destination, run_relay};
 
-const ROUTER_COUNT: usize = 6;
+// every node copies onward to 2 (the spec/image-12) 8 leaves = 2 levels of relays above them,
+// so the path is client -> hop1 -> hop2 -> dest, 3 hops
+const FANOUT: usize = 2;
+const HOP2_COUNT: usize = DECOY_COUNT / FANOUT; // 4
+const HOP1_COUNT: usize = HOP2_COUNT / FANOUT; // 2
 // multiple clients; show they each fan out to the same 8
 const CLIENT_COUNT: usize = 4;
 
@@ -31,6 +35,7 @@ struct Demo {
     members: Vec<fanout::NodeId>, // the fixed public decoy set (8 node ids)
     sent: Vec<(usize, String)>,   // (client idx, wire tag)
     seen: Vec<PacketSeen>,        // one per client per dest
+    hops: Vec<HopSeen>,           // one per client per relay
 }
 
 fn main() -> Result<()> {
@@ -53,6 +58,7 @@ fn run_fanout(hs: HiddenService, client_count: usize) -> Result<Demo> {
     let mut hs_identity = Some(identity);
 
     let (report_tx, report_rx) = mpsc::channel::<PacketSeen>();
+    let (hop_tx, hop_rx) = mpsc::channel::<HopSeen>();
     let mut workers = Vec::new();
 
     // bind & spawn 8 dests, each expects 1 pkt per client. the real slot runs hs with key; decoys are independant nodes, gets its own key and fails to open
@@ -70,36 +76,39 @@ fn run_fanout(hs: HiddenService, client_count: usize) -> Result<Demo> {
             throwaway
         };
         let dest = Destination { slot, secret }; //hs id & secret
-        let tx = report_tx.clone();
+        let dest_report = report_tx.clone();
         workers.push(thread::spawn(move || {
-            run_destination(listener, dest, client_count, tx)
+            run_destination(listener, dest, client_count, dest_report)
         }));
     }
     drop(report_tx);
 
-    // spread 8 dests over 6 routers
-    // uneven on purpose: 8 dests don't divide evenly over 6 routers, so routers 0 and 1 cover 2 dest slots each (0&6, 1&7) while the rest cover 1.
-    let mut router_fanout: Vec<Vec<u16>> = vec![Vec::new(); ROUTER_COUNT];
-    //for 8 nodes: index of node, rand port
-    for (slot, port) in dest_ports.iter().enumerate() {
-        router_fanout[slot % ROUTER_COUNT].push(*port); // router = slot index modulo the amt of routers (slot%6), not an even split
-    }
+    // build tree up, each level is bound after its dest lvl, so it knows the ports to copy to
+    // hop2 relay j feeds dests 2j & 2j+1, hop1 relay k feeds hop2 relays 2k & 2k+1. also, straight split: tree is a binary fan
+    let hop2_ports = spawn_level(
+        2,
+        HOP2_COUNT,
+        &dest_ports,
+        client_count,
+        &hop_tx,
+        &mut workers,
+    )?;
+    let hop1_ports = spawn_level(
+        1,
+        HOP1_COUNT,
+        &hop2_ports,
+        client_count,
+        &hop_tx,
+        &mut workers,
+    )?;
+    drop(hop_tx);
 
-    // bind & spawn 6 routers, each relays 1 pkt per client
-    let mut router_ports = Vec::with_capacity(ROUTER_COUNT); //6
-    for forward_to in router_fanout {
-        let listener = TcpListener::bind(("127.0.0.1", 0)).context("bind router")?;
-        router_ports.push(listener.local_addr()?.port());
-        workers.push(thread::spawn(move || {
-            run_router(listener, forward_to, client_count)
-        }));
-    }
-
-    // every client seals its pkt to same hs pubkey and sends. no client has decoy set: only know hs pubkey
+    // every client seals its pkt to same hs pubkey and pushes into the 2 entry relays
+    // no client has decoy set, it only knows hs pubkey
     let mut sent = Vec::with_capacity(client_count);
     for client in 0..client_count {
         let payload = format!("client {client} calling hidden service");
-        let tag = fanout::deliver(&hs_public, payload.as_bytes(), &router_ports)?;
+        let tag = fanout::deliver(&hs_public, payload.as_bytes(), &hop1_ports)?;
         sent.push((client, tag));
     }
 
@@ -112,6 +121,17 @@ fn run_fanout(hs: HiddenService, client_count: usize) -> Result<Demo> {
             Err(_) => bail!("missing reports, got {}/{}", seen.len(), expected),
         }
     }
+
+    // and one per client per relay, so the hops are shown
+    let expected_hops = client_count * (HOP1_COUNT + HOP2_COUNT);
+    let mut hops = Vec::with_capacity(expected_hops);
+    for _ in 0..expected_hops {
+        match hop_rx.recv_timeout(Duration::from_secs(5)) {
+            Ok(hop) => hops.push(hop),
+            Err(_) => bail!("missing hop reports, got {}/{}", hops.len(), expected_hops),
+        }
+    }
+
     for worker in workers {
         let _ = worker.join();
     }
@@ -122,13 +142,61 @@ fn run_fanout(hs: HiddenService, client_count: usize) -> Result<Demo> {
         members,
         sent,
         seen,
+        hops,
     })
+}
+
+// make one level of relays. relay i takes the FANOUT ports out of next_hop_ports
+// relay 0 takes ports[0..2], relay 1 takes ports[2..4] etc
+// returns this lvl's ports so the lvl above can point at em
+fn spawn_level(
+    level: usize,
+    count: usize,
+    next_hop_ports: &[u16],
+    client_count: usize,
+    hop_tx: &mpsc::Sender<HopSeen>,
+    workers: &mut Vec<thread::JoinHandle<()>>,
+) -> Result<Vec<u16>> {
+    // each relay takes FANOUT of them. problematic if DECOY_COUNT isn't a multiple of 4
+    if next_hop_ports.len() != count * FANOUT {
+        bail!(
+            "level {level}: {count} relays x {FANOUT} = {} next hops needed, got {}",
+            count * FANOUT,
+            next_hop_ports.len()
+        );
+    }
+
+    let mut ports = Vec::with_capacity(count);
+    for index in 0..count {
+        let listener = TcpListener::bind(("127.0.0.1", 0)).context("bind relay")?;
+        ports.push(listener.local_addr()?.port());
+
+        let forward_to = next_hop_ports[index * FANOUT..(index + 1) * FANOUT].to_vec();
+        let relay = Relay { level, index };
+        let hop_report = hop_tx.clone();
+        workers.push(thread::spawn(move || {
+            run_relay(listener, relay, forward_to, client_count, hop_report)
+        }));
+    }
+    Ok(ports)
+}
+
+// how many relays sit at a level: 2 at hop1, 4 at hop2
+fn relays_at(level: usize) -> usize {
+    if level == 1 { HOP1_COUNT } else { HOP2_COUNT }
 }
 
 fn report(demo: &Demo) -> Result<()> {
     let real_slot = demo.real_slot;
     let client_count = demo.sent.len();
-    println!("hidden service is slot {real_slot}, decoy set is the same 8 for every client\n");
+    println!("hidden service slot: {real_slot}, decoy set is the same 8 for every client");
+
+    // real branch. others look the same. this is printed to check the pkt went 3 hops
+    let real_hop2: usize = real_slot / FANOUT;
+    let real_hop1: usize = real_hop2 / FANOUT;
+    println!(
+        "path: client -> {HOP1_COUNT} relays -> {HOP2_COUNT} relays -> {DECOY_COUNT} dests, real branch is hop1 {real_hop1} -> hop2 {real_hop2} -> slot {real_slot}\n"
+    );
 
     // the fixed public decoy set: 8 node ids, no stored marker for which is real.
     println!("decoy set (public node ids, reused long-term):");
@@ -138,10 +206,19 @@ fn report(demo: &Demo) -> Result<()> {
     }
     println!();
 
-    // per client: which of the 8 slots saw its pkt? must be all 8
-    println!("client  tag       reached slots            opened by");
-    println!("------  --------  -----------------------  ---------");
+    // per client: same tag has to show up at hop1 and hop2 before ending on all 8 slots
+    // same bytes at every level shows followed tree instead of client --> node
+    println!("client  tag       hop1  hop2  reached slots            opened by");
+    println!("------  --------  ----  ----  -----------------------  ---------");
     for (client, tag) in &demo.sent {
+        let at_level = |level: usize| {
+            demo.hops
+                .iter()
+                .filter(|h: &&HopSeen| h.level == level && &h.wire_tag == tag)
+                .count()
+        };
+        let (hop1, hop2) = (at_level(1), at_level(2));
+
         let reached: BTreeSet<usize> = demo //which clients saw pkt
             .seen
             .iter()
@@ -156,12 +233,21 @@ fn report(demo: &Demo) -> Result<()> {
             .unwrap_or_else(|| "none".into());
         let slots: Vec<String> = reached.iter().map(|s| s.to_string()).collect();
         println!(
-            "{:>6}  {}  {:<23}  slot {}",
+            "{:>6}  {}  {:>4}  {:>4}  {:<23}  slot {}",
             client,
             tag,
+            hop1,
+            hop2,
             format!("{} ({}/{})", slots.join(","), reached.len(), DECOY_COUNT),
             opener
         );
+
+        // followed both relay levels
+        if hop1 != HOP1_COUNT || hop2 != HOP2_COUNT {
+            bail!(
+                "client {client} pkt hit {hop1}/{HOP1_COUNT} hop1 and {hop2}/{HOP2_COUNT} hop2 relays"
+            );
+        }
 
         // still 8
         if reached.len() != DECOY_COUNT {
@@ -170,6 +256,34 @@ fn report(demo: &Demo) -> Result<()> {
                 reached.len(),
                 DECOY_COUNT
             );
+        }
+    }
+
+    // per relay: 1 pkt per client in, FANOUT copies out
+    println!("\nlevel  relay  received  forwarded");
+    println!("-----  -----  --------  ---------");
+    for level in 1..=2 {
+        for index in 0..relays_at(level) {
+            let relay_hops: Vec<&HopSeen> = demo
+                .hops
+                .iter()
+                .filter(|h| h.level == level && h.index == index)
+                .collect();
+            let forwarded: usize = relay_hops.iter().map(|h: &&HopSeen| h.forwarded).sum();
+            println!(
+                "{:>5}  {:>5}  {:>8}  {:>9}",
+                level,
+                index,
+                relay_hops.len(),
+                forwarded
+            );
+
+            if relay_hops.len() != client_count || forwarded != client_count * FANOUT {
+                bail!(
+                    "relay {level}/{index} misbehaved: {} recv, {forwarded} fwd",
+                    relay_hops.len()
+                );
+            }
         }
     }
 
@@ -199,7 +313,9 @@ fn report(demo: &Demo) -> Result<()> {
     }
 
     // note: a gpa running many clients sees 8 receivers not 1 -> anonymity at 1/8 (unless decoy compromised, then 1/8-k)
-    println!("\nok: all {client_count} clients fanned out to the same {DECOY_COUNT} nodes.");
+    println!(
+        "\nok: all {client_count} clients fanned out over 3 hops to the same {DECOY_COUNT} nodes."
+    );
     Ok(())
 }
 
@@ -237,6 +353,49 @@ mod tests {
             assert_eq!(slot_packets.len(), clients, "slot {slot} wrong recv count");
             let want = if slot == demo.real_slot { clients } else { 0 };
             assert_eq!(opened, want, "slot {slot} opened {opened}, wanted {want}");
+        }
+    }
+
+    // check the pkt is seen at every level rather than the 8 endpoints
+    #[test]
+    fn traffic_walks_three_hops() {
+        let hs: HiddenService = fanout::make_hidden_service().unwrap();
+        let clients: usize = 2;
+        let demo: Demo = run_fanout(hs, clients).unwrap();
+
+        // every relay took 1 pkt and copied it to 2
+        for level in 1..=2 {
+            for index in 0..relays_at(level) {
+                let relay_hops: Vec<&HopSeen> = demo
+                    .hops
+                    .iter()
+                    .filter(|h: &&HopSeen| h.level == level && h.index == index)
+                    .collect();
+                assert_eq!(
+                    relay_hops.len(),
+                    clients,
+                    "relay {level}/{index} wrong recv count"
+                );
+                for hop in relay_hops {
+                    assert_eq!(hop.forwarded, FANOUT, "relay {level}/{index} fanned wrong");
+                }
+            }
+        }
+
+        // same bytes at hop1, hop2 and a dest: the packet went all 3 hops
+        for (client, tag) in &demo.sent {
+            for level in 1..=2 {
+                assert!(
+                    demo.hops
+                        .iter()
+                        .any(|h| h.level == level && &h.wire_tag == tag),
+                    "client {client} pkt never seen at level {level}"
+                );
+            }
+            assert!(
+                demo.seen.iter().any(|p| &p.wire_tag == tag),
+                "client {client} pkt never reached a dest"
+            );
         }
     }
 }

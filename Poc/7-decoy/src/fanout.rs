@@ -171,16 +171,21 @@ fn read_member_set(path: &Path) -> Result<Vec<NodeId>> {
     Ok(members)
 }
 
-// a client's send. client only knows hs public key. seals a pkt and pushes the same bytes to every router; the routers fan it out to the hs's fixed 8
+// a client's send. client only knows hs public key. seals a pkt and pushes the same bytes to entry relays;
+// the tree fans out over 3 hops to the hs's fixed 8
 // returns wire tag so main can confirm which slots saw client's pkt.
-pub fn deliver(hs_public: &EncapsulationKey, payload: &[u8], routers: &[u16]) -> Result<String> {
+pub fn deliver(
+    hs_public: &EncapsulationKey,
+    payload: &[u8],
+    entry_relays: &[u16],
+) -> Result<String> {
     use std::io::Write;
     let packet = envelope::seal(hs_public, payload)?; //envelope.rs main function
     assert_eq!(packet.len(), PACKET_SIZE);
 
-    for port in routers {
+    for port in entry_relays {
         let mut sock = TcpStream::connect(("127.0.0.1", *port))
-            .with_context(|| format!("client dialing router {port}"))?;
+            .with_context(|| format!("client dialing entry relay {port}"))?;
         sock.write_all(&packet)?;
     }
     Ok(wire_tag(&packet))

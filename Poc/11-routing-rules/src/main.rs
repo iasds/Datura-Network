@@ -2,8 +2,10 @@ mod equix_pow;
 use equix_pow::*;
 
 use std::collections::HashMap;
+use std::collections::hash_map::Entry;
 use std::io::{Read, Write};
-use std::net::{TcpListener, TcpStream};
+use std::net::{IpAddr, SocketAddr, TcpListener, TcpStream};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
@@ -15,13 +17,29 @@ const HASH_LEN: usize = 32;
 // A peer that connects but stalls will otherwise hold the thread open indefinitely.
 const IO_TIMEOUT: Duration = Duration::from_secs(30);
 
+// A packet may be re-addressed and forwarded this max amount before it is dropped.
+// Without a limit, nodes can recursively forward the same packet, so a
+// single packet becomes unbounded, one thread and one socket per hop.
+const MAX_HOPS: u8 = 8;
+
+// Upper bound on routing table. An entry costs one PoW to install but nothing to
+// keep, adversary can buy unbounded memory on the node without cap.
+const MAX_RULES: usize = 1024;
+
+// Upper bound on concurrent connections. Every connection is a thread
+// for up to IO_TIMEOUT.
+const MAX_CONNECTIONS: usize = 256;
+
+// Max target address a rule may carry. Both "255.255.255.255:65535" and bracketed IPv6 forms fit.
+const MAX_ADDR_LEN: usize = 64;
+
 const MSG_REGISTER: u8 = 1;
 const MSG_PACKET: u8 = 2;
 const MSG_ACK: u8 = 3;
 const MSG_REJECT: u8 = 4;
 
 struct RoutingRule {
-    target_addr: String,
+    target_addr: SocketAddr,
     target_hash: [u8; HASH_LEN],
 }
 
@@ -43,7 +61,11 @@ fn hash_display(h: &[u8; HASH_LEN]) -> String {
     if h[..end].iter().all(|&b| b.is_ascii_graphic()) {
         String::from_utf8_lossy(&h[..end]).to_string()
     } else {
-        h[..8].iter().map(|b| format!("{b:02x}")).collect::<String>() + "..."
+        h[..8]
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect::<String>()
+            + "..."
     }
 }
 
@@ -51,36 +73,129 @@ fn read_exact(stream: &mut TcpStream, buf: &mut [u8]) -> bool {
     stream.read_exact(buf).is_ok()
 }
 
-fn run_node_a(port: u16) {
-    let table: RoutingTable = Arc::new(Mutex::new(HashMap::new()));
-    let listener = TcpListener::bind(format!("0.0.0.0:{port}")).expect("bind failed");
-    println!("[node-a:{port}] listening");
+// Rejections look identical. Reporting a distinct reason would let
+// anyone spend PoW to learn whether a given hash is routed.
+fn reject(stream: &mut TcpStream) {
+    let _ = stream.write_all(&[MSG_REJECT]);
+}
+
+// Decrements the live-connection count when a handler thread ends.
+struct ConnectionGuard(Arc<AtomicUsize>);
+
+impl Drop for ConnectionGuard {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::AcqRel);
+    }
+}
+
+// Shared accept loop. Bounds live handler threads and treats a failed
+// accept as recoverable.
+fn serve<F>(port: u16, label: &'static str, handler: F)
+where
+    F: Fn(&mut TcpStream, &str) + Send + Sync + 'static,
+{
+    let listener = match TcpListener::bind(format!("0.0.0.0:{port}")) {
+        Ok(l) => l,
+        Err(e) => {
+            eprintln!("[{label}:{port}] bind failed: {e}");
+            return;
+        }
+    };
+    println!("[{label}:{port}] listening");
+
+    let handler = Arc::new(handler);
+    let live = Arc::new(AtomicUsize::new(0));
 
     for incoming in listener.incoming() {
-        let mut stream = incoming.unwrap();
-        stream.set_read_timeout(Some(IO_TIMEOUT)).unwrap();
-        stream.set_write_timeout(Some(IO_TIMEOUT)).unwrap();
-        let peer = stream.peer_addr().map(|a| a.to_string()).unwrap_or_default();
-        let table = table.clone();
-        thread::spawn(move || handle_node_a(&mut stream, &peer, table));
+        let mut stream = match incoming {
+            Ok(s) => s,
+            Err(e) => {
+                println!("[{label}] accept failed: {e}");
+                continue;
+            }
+        };
+
+        if live.fetch_add(1, Ordering::AcqRel) >= MAX_CONNECTIONS {
+            live.fetch_sub(1, Ordering::AcqRel);
+            println!("[{label}] at connection limit ({MAX_CONNECTIONS}), dropping");
+            continue;
+        }
+        let guard = ConnectionGuard(live.clone());
+
+        if stream.set_read_timeout(Some(IO_TIMEOUT)).is_err()
+            || stream.set_write_timeout(Some(IO_TIMEOUT)).is_err()
+        {
+            continue;
+        }
+
+        let peer = stream
+            .peer_addr()
+            .map(|a| a.to_string())
+            .unwrap_or_default();
+        let handler = handler.clone();
+        let spawned = thread::Builder::new().spawn(move || {
+            let _guard = guard;
+            (*handler)(&mut stream, &peer);
+        });
+        if spawned.is_err() {
+            println!("[{label}] could not spawn handler thread, dropping");
+        }
     }
 }
 
-fn handle_node_a(stream: &mut TcpStream, peer: &str, table: RoutingTable) {
-    let mut type_buf = [0u8; 1];
-    if !read_exact(stream, &mut type_buf) { return; }
+// A rule's target is supplied by the registrant and Node A connects on demand.
+// Parsing strictly as an IP:port prevents a DNS lookup on a name of the
+// registrant's choosing, and rules out addresses that would have the node send to non-clients.
+fn parse_target(addr_bytes: &[u8], self_port: u16) -> Result<SocketAddr, &'static str> {
+    let text = std::str::from_utf8(addr_bytes).map_err(|_| "target address is not valid UTF-8")?;
+    let addr: SocketAddr = text
+        .parse()
+        .map_err(|_| "target address is not an IP:port")?;
 
-    match type_buf[0] {
-        MSG_REGISTER => handle_register(stream, peer, table),
-        MSG_PACKET   => handle_packet(stream, peer, table),
-        other => println!("[node-a] {peer}: unknown message type {other}"),
+    if addr.port() == 0 {
+        return Err("target port is zero");
     }
+    let ip = addr.ip();
+    if ip.is_unspecified() || ip.is_multicast() {
+        return Err("target address is not a unicast host");
+    }
+    if let IpAddr::V4(v4) = ip
+        && v4.is_broadcast()
+    {
+        return Err("target address is a broadcast address");
+    }
+    // A rule pointing back at this node's listener is a loop.
+    // MAX_HOPS bounds, but there is no reason to accept.
+    if addr.port() == self_port && ip.is_loopback() {
+        return Err("target address is this node");
+    }
+    Ok(addr)
 }
 
-fn handle_register(stream: &mut TcpStream, peer: &str, table: RoutingTable) {
+fn run_node_a(port: u16) {
+    let table: RoutingTable = Arc::new(Mutex::new(HashMap::new()));
+    serve(port, "node-a", move |stream, peer| {
+        let mut type_buf = [0u8; 1];
+        if !read_exact(stream, &mut type_buf) {
+            return;
+        }
+
+        match type_buf[0] {
+            MSG_REGISTER => handle_register(stream, peer, &table, port),
+            MSG_PACKET => handle_packet(stream, peer, &table),
+            other => println!("[node-a] {peer}: unknown message type {other}"),
+        }
+    });
+}
+
+fn handle_register(stream: &mut TcpStream, peer: &str, table: &RoutingTable, self_port: u16) {
     let challenge = create_challenge(CHALLENGE_DIFFICULTY);
-    if stream.write_all(&challenge.to_le_bytes()).is_err() { return; }
-    println!("[node-a] {peer}: register request, sent challenge (difficulty {CHALLENGE_DIFFICULTY})");
+    if stream.write_all(&challenge.to_le_bytes()).is_err() {
+        return;
+    }
+    println!(
+        "[node-a] {peer}: register request, sent challenge (difficulty {CHALLENGE_DIFFICULTY})"
+    );
 
     // Wire format for registration (received after challenge):
     //   [solution: 24 bytes]
@@ -90,76 +205,152 @@ fn handle_register(stream: &mut TcpStream, peer: &str, table: RoutingTable) {
     //   [target_hash: 32 bytes]
 
     let mut solution = [0u8; 24];
-    if !read_exact(stream, &mut solution) { return; }
+    if !read_exact(stream, &mut solution) {
+        return;
+    }
 
     if !verify_solution(CHALLENGE_DIFFICULTY, challenge, solution) {
         println!("[node-a] {peer}: bad PoW, rejecting");
-        let _ = stream.write_all(&[MSG_REJECT]);
+        reject(stream);
         return;
     }
 
     let mut match_hash = [0u8; HASH_LEN];
-    if !read_exact(stream, &mut match_hash) { return; }
+    if !read_exact(stream, &mut match_hash) {
+        return;
+    }
 
     let mut addr_len_buf = [0u8; 2];
-    if !read_exact(stream, &mut addr_len_buf) { return; }
+    if !read_exact(stream, &mut addr_len_buf) {
+        return;
+    }
     let addr_len = u16::from_le_bytes(addr_len_buf) as usize;
+    if addr_len > MAX_ADDR_LEN {
+        println!("[node-a] {peer}: target address too long ({addr_len} bytes), rejecting");
+        reject(stream);
+        return;
+    }
     let mut addr_buf = vec![0u8; addr_len];
-    if !read_exact(stream, &mut addr_buf) { return; }
-    let target_addr = String::from_utf8_lossy(&addr_buf).to_string();
+    if !read_exact(stream, &mut addr_buf) {
+        return;
+    }
 
     let mut target_hash = [0u8; HASH_LEN];
-    if !read_exact(stream, &mut target_hash) { return; }
+    if !read_exact(stream, &mut target_hash) {
+        return;
+    }
+
+    let target_addr = match parse_target(&addr_buf, self_port) {
+        Ok(a) => a,
+        Err(why) => {
+            println!("[node-a] {peer}: {why}, rejecting");
+            reject(stream);
+            return;
+        }
+    };
+
+    // The routing table is never sent; exists only in memory.
+    // Peers can only observe that a rule exists by watching packets get forwarded.
+    let stored = {
+        let mut t = table.lock().unwrap();
+        if t.len() >= MAX_RULES {
+            Err("routing table full")
+        } else {
+            match t.entry(match_hash) {
+                // First wins. Allowing overwrites would let anyone displace a live rule,
+                // and redirecting its traffic to an address of their choosing.
+                // No way to tell a legitimate re-registration from a hijack, so refuse both. (PoC 10 scope)
+                Entry::Occupied(_) => Err("a rule for that hash already exists"),
+                Entry::Vacant(slot) => {
+                    slot.insert(RoutingRule {
+                        target_addr,
+                        target_hash,
+                    });
+                    Ok(())
+                }
+            }
+        }
+    };
+
+    if let Err(why) = stored {
+        println!("[node-a] {peer}: {why}, rejecting");
+        reject(stream);
+        return;
+    }
 
     println!(
         "[node-a] {peer}: rule stored: '{}' -> {} @ '{}'",
-        hash_display(&match_hash), target_addr, hash_display(&target_hash)
+        hash_display(&match_hash),
+        target_addr,
+        hash_display(&target_hash)
     );
-
-    // The routing table is never sent over the wire; it exists only in memory.
-    // Peers can only observe that a rule exists by watching packets get forwarded.
-    table.lock().unwrap().insert(match_hash, RoutingRule { target_addr, target_hash });
     let _ = stream.write_all(&[MSG_ACK]);
 }
 
-fn handle_packet(stream: &mut TcpStream, peer: &str, table: RoutingTable) {
+fn handle_packet(stream: &mut TcpStream, peer: &str, table: &RoutingTable) {
     // Wire format for a packet:
+    //   [hops_left: 1 byte]
     //   [dest_hash: 32 bytes]
     //   [payload_len: 2 bytes LE]
     //   [payload: N bytes]
 
+    let mut hops_buf = [0u8; 1];
+    if !read_exact(stream, &mut hops_buf) {
+        return;
+    }
+    let hops_left = hops_buf[0];
+
     let mut dest_hash = [0u8; HASH_LEN];
-    if !read_exact(stream, &mut dest_hash) { return; }
+    if !read_exact(stream, &mut dest_hash) {
+        return;
+    }
 
     let mut len_buf = [0u8; 2];
-    if !read_exact(stream, &mut len_buf) { return; }
+    if !read_exact(stream, &mut len_buf) {
+        return;
+    }
     let payload_len = u16::from_le_bytes(len_buf) as usize;
     let mut payload = vec![0u8; payload_len];
-    if !read_exact(stream, &mut payload) { return; }
+    if !read_exact(stream, &mut payload) {
+        return;
+    }
 
-    println!("[node-a] {peer}: packet arrived for hash '{}'", hash_display(&dest_hash));
+    println!(
+        "[node-a] {peer}: packet arrived for hash '{}' ({hops_left} hops left)",
+        hash_display(&dest_hash)
+    );
+
+    if hops_left == 0 {
+        println!("[node-a] {peer}: hop limit reached, dropping");
+        return;
+    }
 
     let rule = {
         let t = table.lock().unwrap();
-        t.get(&dest_hash).map(|r| (r.target_addr.clone(), r.target_hash))
+        t.get(&dest_hash).map(|r| (r.target_addr, r.target_hash))
     };
 
     match rule {
         None => {
             // Unknown hash: drop silently. The sender gets no response either way,
             // so a fail reveals nothing about what rules are stored.
-            println!("[node-a] {peer}: no routing rule for '{}', dropping", hash_display(&dest_hash));
+            println!(
+                "[node-a] {peer}: no routing rule for '{}', dropping",
+                hash_display(&dest_hash)
+            );
         }
         Some((target_addr, target_hash)) => {
             println!(
                 "[node-a] {peer}: forwarding to {} re-addressed as '{}'",
-                target_addr, hash_display(&target_hash)
+                target_addr,
+                hash_display(&target_hash)
             );
-            match TcpStream::connect(&target_addr) {
+            match TcpStream::connect(target_addr) {
                 Err(e) => println!("[node-a] connect to {target_addr} failed: {e}"),
                 Ok(mut fwd) => {
-                    fwd.set_write_timeout(Some(IO_TIMEOUT)).unwrap();
-                    let ok = fwd.write_all(&[MSG_PACKET]).is_ok()
+                    let ok = fwd.set_write_timeout(Some(IO_TIMEOUT)).is_ok()
+                        && fwd.write_all(&[MSG_PACKET]).is_ok()
+                        && fwd.write_all(&[hops_left - 1]).is_ok()
                         && fwd.write_all(&target_hash).is_ok()
                         && fwd.write_all(&(payload.len() as u16).to_le_bytes()).is_ok()
                         && fwd.write_all(&payload).is_ok();
@@ -175,36 +366,43 @@ fn handle_packet(stream: &mut TcpStream, peer: &str, table: RoutingTable) {
 }
 
 fn run_node_c(port: u16) {
-    let listener = TcpListener::bind(format!("0.0.0.0:{port}")).expect("bind failed");
-    println!("[node-c:{port}] listening");
+    serve(port, "node-c", |stream, peer| {
+        let mut type_buf = [0u8; 1];
+        if !read_exact(stream, &mut type_buf) {
+            return;
+        }
+        if type_buf[0] != MSG_PACKET {
+            return;
+        }
 
-    for incoming in listener.incoming() {
-        let mut stream = incoming.unwrap();
-        stream.set_read_timeout(Some(IO_TIMEOUT)).unwrap();
-        let peer = stream.peer_addr().map(|a| a.to_string()).unwrap_or_default();
-        thread::spawn(move || {
-            let mut type_buf = [0u8; 1];
-            if !read_exact(&mut stream, &mut type_buf) { return; }
-            if type_buf[0] != MSG_PACKET { return; }
+        let mut hops_buf = [0u8; 1];
+        if !read_exact(stream, &mut hops_buf) {
+            return;
+        }
 
-            let mut dest_hash = [0u8; HASH_LEN];
-            if !read_exact(&mut stream, &mut dest_hash) { return; }
+        let mut dest_hash = [0u8; HASH_LEN];
+        if !read_exact(stream, &mut dest_hash) {
+            return;
+        }
 
-            let mut len_buf = [0u8; 2];
-            if !read_exact(&mut stream, &mut len_buf) { return; }
-            let payload_len = u16::from_le_bytes(len_buf) as usize;
-            let mut payload = vec![0u8; payload_len];
-            if !read_exact(&mut stream, &mut payload) { return; }
+        let mut len_buf = [0u8; 2];
+        if !read_exact(stream, &mut len_buf) {
+            return;
+        }
+        let payload_len = u16::from_le_bytes(len_buf) as usize;
+        let mut payload = vec![0u8; payload_len];
+        if !read_exact(stream, &mut payload) {
+            return;
+        }
 
-            println!("[node-c] packet received from {peer}:");
-            println!("  dest_hash : '{}'", hash_display(&dest_hash));
-            println!("  payload   : \"{}\"", String::from_utf8_lossy(&payload));
-        });
-    }
+        println!("[node-c] packet received from {peer}:");
+        println!("  dest_hash : '{}'", hash_display(&dest_hash));
+        println!("  payload   : \"{}\"", String::from_utf8_lossy(&payload));
+    });
 }
 
 fn do_register(node_a_addr: &str, match_hash_str: &str, node_c_addr: &str, target_hash_str: &str) {
-    let match_hash  = hash_from_str(match_hash_str);
+    let match_hash = hash_from_str(match_hash_str);
     let target_hash = hash_from_str(target_hash_str);
 
     println!("[register] connecting to node-a at {node_a_addr}");
@@ -221,39 +419,53 @@ fn do_register(node_a_addr: &str, match_hash_str: &str, node_c_addr: &str, targe
         get_challenge_effort(challenge)
     );
 
-    let threads = thread::available_parallelism().map(|n| n.get()).unwrap_or(1);
+    let threads = thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(1);
     let solution = solve_challenge(threads, challenge);
-    println!("[register] solved, submitting rule: '{}' -> {} @ '{}'",
-        match_hash_str, node_c_addr, target_hash_str);
+    println!(
+        "[register] solved, submitting rule: '{}' -> {} @ '{}'",
+        match_hash_str, node_c_addr, target_hash_str
+    );
 
     let addr_bytes = node_c_addr.as_bytes();
     stream.write_all(&solution).unwrap();
     stream.write_all(&match_hash).unwrap();
-    stream.write_all(&(addr_bytes.len() as u16).to_le_bytes()).unwrap();
+    stream
+        .write_all(&(addr_bytes.len() as u16).to_le_bytes())
+        .unwrap();
     stream.write_all(addr_bytes).unwrap();
     stream.write_all(&target_hash).unwrap();
 
     let mut resp = [0u8; 1];
     stream.read_exact(&mut resp).unwrap();
     match resp[0] {
-        MSG_ACK    => println!("[register] routing rule accepted"),
-        MSG_REJECT => println!("[register] routing rule rejected (bad PoW)"),
-        other      => println!("[register] unexpected response byte {other}"),
+        MSG_ACK => println!("[register] routing rule accepted"),
+        // Node A provides no response. Rejection is identical so that
+        // it cannot be used by advisaries.
+        MSG_REJECT => println!("[register] routing rule rejected"),
+        other => println!("[register] unexpected response byte {other}"),
     }
 }
 
 fn do_send(node_a_addr: &str, dest_hash_str: &str, message: &str) {
     let dest_hash = hash_from_str(dest_hash_str);
-    let payload   = message.as_bytes();
+    let payload = message.as_bytes();
 
-    println!("[send] --> node-a at {node_a_addr}, hash '{}', {} bytes",
-        dest_hash_str, payload.len());
+    println!(
+        "[send] --> node-a at {node_a_addr}, hash '{}', {} bytes",
+        dest_hash_str,
+        payload.len()
+    );
     let mut stream = TcpStream::connect(node_a_addr).expect("connect failed");
     stream.set_write_timeout(Some(IO_TIMEOUT)).unwrap();
 
     stream.write_all(&[MSG_PACKET]).unwrap();
+    stream.write_all(&[MAX_HOPS]).unwrap();
     stream.write_all(&dest_hash).unwrap();
-    stream.write_all(&(payload.len() as u16).to_le_bytes()).unwrap();
+    stream
+        .write_all(&(payload.len() as u16).to_le_bytes())
+        .unwrap();
     stream.write_all(payload).unwrap();
 }
 
@@ -280,6 +492,16 @@ fn run_test() {
 
     println!("\nstep 3: packet for unknown hash is dropped by Node A");
     do_send(&addr_a, "UNKNOWN", "this should be silently dropped");
+
+    thread::sleep(Duration::from_millis(200));
+
+    println!("\nstep 4: a second rule for '44AWD' is refused (hijack attempt)");
+    do_register(&addr_a, "44AWD", "127.0.0.1:9199", "88QWD");
+
+    thread::sleep(Duration::from_millis(100));
+
+    println!("\nstep 5: a rule pointing back at Node A is refused (routing loop)");
+    do_register(&addr_a, "LOOPHASH", &addr_a, "LOOPHASH");
 
     thread::sleep(Duration::from_millis(200));
     println!("\ntest complete");

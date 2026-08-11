@@ -2,102 +2,111 @@
 // Diverges from that copy: verify_solution derives the effort from the
 // challenge itself instead of taking it as a parameter, since the effort is
 // packed into the challenge's low 32 bits anyway.
+use blake2::{
+    Blake2bVar,
+    digest::{Update, VariableOutput},
+};
 use equix::*;
-use blake2::{Blake2bVar, digest::{Update, VariableOutput}};
-use std::thread;
-use std::sync::atomic::{AtomicBool,Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::thread;
 
 pub fn create_challenge(effort: u32) -> u128 {
-	// pack random number and effort into challenge
-	(getrandom::u64().unwrap() as u128) << 64 |
-	(getrandom::u32().unwrap() as u128) << 32 |
-	effort as u128
+    // pack random number and effort into challenge
+    (getrandom::u64().unwrap() as u128) << 64
+        | (getrandom::u32().unwrap() as u128) << 32
+        | effort as u128
 }
 
-pub fn get_challenge_effort(challenge: u128) -> u32 { (challenge & 0xffffffff) as u32 }
+pub fn get_challenge_effort(challenge: u128) -> u32 {
+    (challenge & 0xffffffff) as u32
+}
 
 // BLAKE2b truncated to 4 bytes, used for the outer difficulty check on top of Equi-X.
 fn blake2b_4(data: &[u8]) -> u32 {
-	let mut h = Blake2bVar::new(4).unwrap();
-	h.update(data);
-	let mut out = [0u8; 4];
-	h.finalize_variable(&mut out).unwrap();
-	u32::from_le_bytes(out)
+    let mut h = Blake2bVar::new(4).unwrap();
+    h.update(data);
+    let mut out = [0u8; 4];
+    h.finalize_variable(&mut out).unwrap();
+    u32::from_le_bytes(out)
 }
 
 pub fn solve_challenge(num_threads: usize, challenge: u128) -> [u8; 24] {
-	let effort = get_challenge_effort(challenge);
+    let effort = get_challenge_effort(challenge);
 
-	let search_pos: u64 = getrandom::u64().unwrap();
-	let search_inc = u64::MAX / num_threads as u64;
+    let search_pos: u64 = getrandom::u64().unwrap();
+    let search_inc = u64::MAX / num_threads as u64;
 
-	let mut handles: Vec<thread::JoinHandle<Option<[u8; 24]>>> = Vec::with_capacity(num_threads);
-	let done = Arc::new(AtomicBool::new(false));
+    let mut handles: Vec<thread::JoinHandle<Option<[u8; 24]>>> = Vec::with_capacity(num_threads);
+    let done = Arc::new(AtomicBool::new(false));
 
-	for t in 0..num_threads {
-		// each thread needs to search as far away from each other as they can
-		let mut salt: u64 = search_pos.wrapping_add(search_inc.wrapping_mul(t as u64));
+    for t in 0..num_threads {
+        // each thread needs to search as far away from each other as they can
+        let mut salt: u64 = search_pos.wrapping_add(search_inc.wrapping_mul(t as u64));
 
-		let done_local = done.clone();
-		handles.push(thread::spawn(move || {
-			let mut mem = SolverMemory::new();
+        let done_local = done.clone();
+        handles.push(thread::spawn(move || {
+            let mut mem = SolverMemory::new();
 
-			// repeat Equi-X solutions until one matches requirements
-			loop {
-				salt = salt.wrapping_add(1);
+            // repeat Equi-X solutions until one matches requirements
+            loop {
+                salt = salt.wrapping_add(1);
 
-				let mut seed = [0u8; 40];
+                let mut seed = [0u8; 40];
 
-				// pack challenge and salt to attempt Equi-X solution for
-				seed[..16].copy_from_slice(&challenge.to_le_bytes());
-				seed[16..24].copy_from_slice(&salt.to_le_bytes());
+                // pack challenge and salt to attempt Equi-X solution for
+                seed[..16].copy_from_slice(&challenge.to_le_bytes());
+                seed[16..24].copy_from_slice(&salt.to_le_bytes());
 
-				let equix = match EquiX::new(&seed[..24]) {
-					Ok(v) => v,
-					Err(_) => continue,
-				};
+                let equix = match EquiX::new(&seed[..24]) {
+                    Ok(v) => v,
+                    Err(_) => continue,
+                };
 
-				let equix_solutions = equix.solve_with_memory(&mut mem);
-				if equix_solutions.is_empty() { continue; }
+                let equix_solutions = equix.solve_with_memory(&mut mem);
+                if equix_solutions.is_empty() {
+                    continue;
+                }
 
-				seed[24..40].copy_from_slice(&equix_solutions[0].to_bytes());
+                seed[24..40].copy_from_slice(&equix_solutions[0].to_bytes());
 
-				// if requirements are met, signal other threads to stop, then return
-				if (blake2b_4(&seed) as u64) * (effort as u64) < u32::MAX.into() {
-					done_local.store(true, Ordering::Release);
-					return Some(seed[16..40].try_into().unwrap());
-				}
+                // if requirements are met, signal other threads to stop, then return
+                if (blake2b_4(&seed) as u64) * (effort as u64) < u32::MAX.into() {
+                    done_local.store(true, Ordering::Release);
+                    return Some(seed[16..40].try_into().unwrap());
+                }
 
-				if done_local.load(Ordering::Acquire) {
-					return None;
-				}
-			}
-		}));
-	}
+                if done_local.load(Ordering::Acquire) {
+                    return None;
+                }
+            }
+        }));
+    }
 
-	// join each handle until one returns a valid value, then return that value
-	for h in handles {
-		if let Some(solution) = h.join().unwrap() {
-			return solution;
-		}
-	}
+    // join each handle until one returns a valid value, then return that value
+    for h in handles {
+        if let Some(solution) = h.join().unwrap() {
+            return solution;
+        }
+    }
 
-	unreachable!("every solver thread exited without a solution");
+    unreachable!("every solver thread exited without a solution");
 }
 
 pub fn verify_solution(challenge: u128, solution: [u8; 24]) -> bool {
-	let effort = get_challenge_effort(challenge);
+    let effort = get_challenge_effort(challenge);
 
-	let mut seed = [0u8; 40];
+    let mut seed = [0u8; 40];
 
-	// pack challenge and solution for hashing
-	seed[..16].copy_from_slice(&challenge.to_le_bytes());
-	seed[16..].copy_from_slice(&solution);
+    // pack challenge and solution for hashing
+    seed[..16].copy_from_slice(&challenge.to_le_bytes());
+    seed[16..].copy_from_slice(&solution);
 
-	// fail if requirements are not met
-	if (blake2b_4(&seed) as u64) * (effort as u64) >= u32::MAX.into() { return false; }
+    // fail if requirements are not met
+    if (blake2b_4(&seed) as u64) * (effort as u64) >= u32::MAX.into() {
+        return false;
+    }
 
-	// fail or succeed depending on if Equi-X solution is verified
-	return verify_bytes(&seed[..24], &seed[24..].try_into().unwrap()).is_ok();
+    // fail or succeed depending on if Equi-X solution is verified
+    verify_bytes(&seed[..24], &seed[24..].try_into().unwrap()).is_ok()
 }

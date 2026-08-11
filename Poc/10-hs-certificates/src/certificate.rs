@@ -6,8 +6,8 @@ use std::sync::LazyLock;
 
 use ff::PrimeField;
 use group::ff::Field;
-use group::{prime::PrimeCurveAffine, GroupEncoding};
-use pasta_curves::{pallas, EqAffine};
+use group::{GroupEncoding, prime::PrimeCurveAffine};
+use pasta_curves::{EqAffine, pallas};
 use rand::rngs::OsRng;
 use serde::{Deserialize, Serialize};
 
@@ -17,7 +17,7 @@ use halo2_proofs::{
     transcript::{Blake2bRead, Blake2bWrite, Challenge255},
 };
 
-use crate::circuit::{envelope_message, hs_hash, CertificateCircuit};
+use crate::circuit::{CertificateCircuit, envelope_message, hs_hash};
 use crate::dlog::derive_pk;
 use crate::schnorr::{self, sign};
 
@@ -27,7 +27,7 @@ use halo2_gadgets::poseidon::primitives::{ConstantLength, Hash as PoseidonHash, 
 // circuit fits comfortably in 2^12 rows (the range-check lookup table
 // needs 2^10; the ECC/Poseidon gates fit in remainder). Lower K means
 // faster proving and verification, so this is set as low as the circuit
-// allows. Network would generate PARAMS/PK once and distribute them, 
+// allows. Network would generate PARAMS/PK once and distribute them,
 // rather than every node regenerating them from scratch.
 pub const K: u32 = 12;
 
@@ -62,7 +62,7 @@ pub struct Certificate {
     // When the grant was issued (unix seconds). Together with `expires` this
     // pins down the paid-for window (expires - issued_at). (What a
     // standalone verifier recomputes the required PoW effort from) It is bound
-    // into the RDV node's endorsement, so neither Node B nor a relay can restate it 
+    // into the RDV node's endorsement, so neither Node B nor a relay can restate it
     // after the fact without invalidating the endorsement.
     pub issued_at: u64,
     pub expires: u64,
@@ -122,7 +122,14 @@ pub(crate) fn prove_signed_envelope(
 pub(crate) fn verify_signed_envelope(proof: &[u8], instance: [pallas::Base; 4]) -> bool {
     let strategy = SingleVerifier::new(&PARAMS);
     let mut transcript = Blake2bRead::<_, _, Challenge255<_>>::init(proof);
-    plonk::verify_proof(&PARAMS, PK.get_vk(), strategy, &[&[&instance]], &mut transcript).is_ok()
+    plonk::verify_proof(
+        &PARAMS,
+        PK.get_vk(),
+        strategy,
+        &[&[&instance]],
+        &mut transcript,
+    )
+    .is_ok()
 }
 
 // Builds a certificate: Node B (the hidden service destination), w/ sk,
@@ -242,7 +249,10 @@ pub fn verify_certificate(cert: &Certificate) -> bool {
     };
     let expires_fp = pallas::Base::from(cert.expires);
     let challenge_fp = u128_to_fp(cert.pow_challenge);
-    verify_signed_envelope(&cert.proof, [hs_hash_fp, rdv_hash_fp, expires_fp, challenge_fp])
+    verify_signed_envelope(
+        &cert.proof,
+        [hs_hash_fp, rdv_hash_fp, expires_fp, challenge_fp],
+    )
 }
 
 #[cfg(test)]
@@ -253,7 +263,15 @@ mod tests {
     fn round_trip_valid_certificate_verifies() {
         let sk = pallas::Scalar::random(OsRng);
         let rdv_node_hash: [u8; 32] = pallas::Base::random(OsRng).to_repr();
-        let cert = build_certificate(sk, rdv_node_hash, 1_800_000_000 - 86_400, 1_800_000_000, 42, [7u8; 24]).unwrap();
+        let cert = build_certificate(
+            sk,
+            rdv_node_hash,
+            1_800_000_000 - 86_400,
+            1_800_000_000,
+            42,
+            [7u8; 24],
+        )
+        .unwrap();
         assert!(verify_certificate(&cert));
     }
 
@@ -261,7 +279,15 @@ mod tests {
     fn tampered_expires_fails_verification() {
         let sk = pallas::Scalar::random(OsRng);
         let rdv_node_hash: [u8; 32] = pallas::Base::random(OsRng).to_repr();
-        let mut cert = build_certificate(sk, rdv_node_hash, 1_800_000_000 - 86_400, 1_800_000_000, 42, [7u8; 24]).unwrap();
+        let mut cert = build_certificate(
+            sk,
+            rdv_node_hash,
+            1_800_000_000 - 86_400,
+            1_800_000_000,
+            42,
+            [7u8; 24],
+        )
+        .unwrap();
         cert.expires = 9_999_999_999;
         assert!(!verify_certificate(&cert));
     }
@@ -270,7 +296,15 @@ mod tests {
     fn claimed_hash_not_matching_key_fails_verification() {
         let sk = pallas::Scalar::random(OsRng);
         let rdv_node_hash: [u8; 32] = pallas::Base::random(OsRng).to_repr();
-        let mut cert = build_certificate(sk, rdv_node_hash, 1_800_000_000 - 86_400, 1_800_000_000, 42, [7u8; 24]).unwrap();
+        let mut cert = build_certificate(
+            sk,
+            rdv_node_hash,
+            1_800_000_000 - 86_400,
+            1_800_000_000,
+            42,
+            [7u8; 24],
+        )
+        .unwrap();
         cert.hs_hash = pallas::Base::random(OsRng).to_repr();
         assert!(!verify_certificate(&cert));
     }
@@ -297,7 +331,15 @@ mod tests {
         let sk_b = pallas::Scalar::random(OsRng);
         let sk_a = pallas::Scalar::random(OsRng);
         let node_a_hash: [u8; 32] = hs_hash(derive_pk(sk_a)).to_repr();
-        let mut cert = build_certificate(sk_b, node_a_hash, 1_800_000_000 - 86_400, 1_800_000_000, 42, [7u8; 24]).unwrap();
+        let mut cert = build_certificate(
+            sk_b,
+            node_a_hash,
+            1_800_000_000 - 86_400,
+            1_800_000_000,
+            42,
+            [7u8; 24],
+        )
+        .unwrap();
 
         assert!(!verify_endorsement(&cert)); // not endorsed yet
         cert.endorsement = Some(endorse_certificate(sk_a, &cert));
@@ -312,7 +354,15 @@ mod tests {
         let sk_a = pallas::Scalar::random(OsRng);
         let sk_imposter = pallas::Scalar::random(OsRng);
         let node_a_hash: [u8; 32] = hs_hash(derive_pk(sk_a)).to_repr();
-        let mut cert = build_certificate(sk_b, node_a_hash, 1_800_000_000 - 86_400, 1_800_000_000, 42, [7u8; 24]).unwrap();
+        let mut cert = build_certificate(
+            sk_b,
+            node_a_hash,
+            1_800_000_000 - 86_400,
+            1_800_000_000,
+            42,
+            [7u8; 24],
+        )
+        .unwrap();
 
         cert.endorsement = Some(endorse_certificate(sk_imposter, &cert));
         assert!(!verify_endorsement(&cert));
@@ -325,7 +375,15 @@ mod tests {
         let sk_b = pallas::Scalar::random(OsRng);
         let sk_a = pallas::Scalar::random(OsRng);
         let node_a_hash: [u8; 32] = hs_hash(derive_pk(sk_a)).to_repr();
-        let mut cert = build_certificate(sk_b, node_a_hash, 1_800_000_000 - 86_400, 1_800_000_000, 42, [7u8; 24]).unwrap();
+        let mut cert = build_certificate(
+            sk_b,
+            node_a_hash,
+            1_800_000_000 - 86_400,
+            1_800_000_000,
+            42,
+            [7u8; 24],
+        )
+        .unwrap();
         cert.endorsement = Some(endorse_certificate(sk_a, &cert));
 
         cert.expires = 9_999_999_999;
@@ -339,7 +397,15 @@ mod tests {
         let sk_b = pallas::Scalar::random(OsRng);
         let sk_a = pallas::Scalar::random(OsRng);
         let node_a_hash: [u8; 32] = hs_hash(derive_pk(sk_a)).to_repr();
-        let mut cert = build_certificate(sk_b, node_a_hash, 1_800_000_000 - 86_400, 1_800_000_000, 42, [7u8; 24]).unwrap();
+        let mut cert = build_certificate(
+            sk_b,
+            node_a_hash,
+            1_800_000_000 - 86_400,
+            1_800_000_000,
+            42,
+            [7u8; 24],
+        )
+        .unwrap();
         cert.endorsement = Some(endorse_certificate(sk_a, &cert));
 
         cert.issued_at = 1_800_000_000 - 1; // claim a 1-second window

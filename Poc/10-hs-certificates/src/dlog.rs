@@ -2,7 +2,6 @@
 // pk = [sk]G, for a fixed public generator G (the pasta pallas curve
 // generator), exposing pk as a public instance.
 
-
 // NOTE:
 // This mirrors halo2_gadgets::ecc's own internal TestFixedBases test
 // circuit, and the fixed-base mul pattern Orchard uses for
@@ -15,13 +14,15 @@ use group::{Curve, Group};
 use pasta_curves::pallas;
 
 use halo2_gadgets::ecc::{
-    chip::{
-        find_zs_and_us, BaseFieldElem, EccChip, EccConfig, FixedPoint as FixedPointConstants,
-        FullScalar, ShortScalar, H, NUM_WINDOWS,
-    },
     FixedPoint, FixedPoints, ScalarFixed,
+    chip::{
+        BaseFieldElem, EccChip, EccConfig, FixedPoint as FixedPointConstants, FullScalar, H,
+        NUM_WINDOWS, ShortScalar, find_zs_and_us,
+    },
 };
-use halo2_gadgets::utilities::lookup_range_check::{LookupRangeCheck, PallasLookupRangeCheckConfig};
+use halo2_gadgets::utilities::lookup_range_check::{
+    LookupRangeCheck, PallasLookupRangeCheckConfig,
+};
 use halo2_proofs::{
     circuit::{Layouter, SimpleFloorPlanner, Value},
     plonk::{Advice, Circuit, Column, ConstraintSystem, Error, Fixed, Instance, TableColumn},
@@ -153,9 +154,7 @@ pub struct DlogConfig {
 // Standard 10-advice / lookup / lagrange-coeff ecc chip setup, shared by
 // every circuit in this crate that needs elliptic-curve gates. Returns the
 // raw lookup_table column too, b/c loading it is our own responsibility.
-pub fn configure_ecc(
-    meta: &mut ConstraintSystem<pallas::Base>,
-) -> (HsEccConfig, TableColumn) {
+pub fn configure_ecc(meta: &mut ConstraintSystem<pallas::Base>) -> (HsEccConfig, TableColumn) {
     let advices: [Column<Advice>; 10] = (0..10)
         .map(|_| meta.advice_column())
         .collect::<Vec<_>>()
@@ -243,8 +242,12 @@ mod tests {
         let circuit = DlogCircuit {
             sk: Value::known(sk),
         };
-        let prover =
-            MockProver::run(crate::certificate::K, &circuit, vec![vec![*pk.x(), *pk.y()]]).unwrap();
+        let prover = MockProver::run(
+            crate::certificate::K,
+            &circuit,
+            vec![vec![*pk.x(), *pk.y()]],
+        )
+        .unwrap();
         assert_eq!(prover.verify(), Ok(()));
     }
 
@@ -258,8 +261,12 @@ mod tests {
         let circuit = DlogCircuit {
             sk: Value::known(sk),
         };
-        let prover =
-            MockProver::run(crate::certificate::K, &circuit, vec![vec![*wrong_pk.x(), *wrong_pk.y()]]).unwrap();
+        let prover = MockProver::run(
+            crate::certificate::K,
+            &circuit,
+            vec![vec![*wrong_pk.x(), *wrong_pk.y()]],
+        )
+        .unwrap();
         assert!(prover.verify().is_err());
     }
 }

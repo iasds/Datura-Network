@@ -1,10 +1,12 @@
 use pasta_curves::pallas;
 
-use crate::dlog::{configure_ecc, derive_pk, load_plain_range_table, HsEccChip, HsEccConfig, HsGenerator};
+use crate::dlog::{
+    HsEccChip, HsEccConfig, HsGenerator, configure_ecc, derive_pk, load_plain_range_table,
+};
 use halo2_gadgets::ecc::{FixedPoint, NonIdentityPoint, ScalarFixed, ScalarVar};
 use halo2_gadgets::poseidon::{
-    primitives::{ConstantLength, P128Pow5T3},
     Hash, Pow5Chip, Pow5Config,
+    primitives::{ConstantLength, P128Pow5T3},
 };
 use halo2_proofs::{
     circuit::{Layouter, SimpleFloorPlanner, Value},
@@ -25,20 +27,32 @@ pub struct CertificateConfig {
 
 fn configure_poseidon(
     meta: &mut ConstraintSystem<pallas::Base>,
-) -> (Pow5Config<pallas::Base, WIDTH, RATE>, [Column<Advice>; WIDTH]) {
+) -> (
+    Pow5Config<pallas::Base, WIDTH, RATE>,
+    [Column<Advice>; WIDTH],
+) {
     let poseidon_state: [Column<Advice>; WIDTH] = (0..WIDTH)
         .map(|_| meta.advice_column())
         .collect::<Vec<_>>()
         .try_into()
         .unwrap();
     let partial_sbox = meta.advice_column();
-    let rc_a: [Column<Fixed>; WIDTH] = (0..WIDTH).map(|_| meta.fixed_column()).collect::<Vec<_>>().try_into().unwrap();
-    let rc_b: [Column<Fixed>; WIDTH] = (0..WIDTH).map(|_| meta.fixed_column()).collect::<Vec<_>>().try_into().unwrap();
+    let rc_a: [Column<Fixed>; WIDTH] = (0..WIDTH)
+        .map(|_| meta.fixed_column())
+        .collect::<Vec<_>>()
+        .try_into()
+        .unwrap();
+    let rc_b: [Column<Fixed>; WIDTH] = (0..WIDTH)
+        .map(|_| meta.fixed_column())
+        .collect::<Vec<_>>()
+        .try_into()
+        .unwrap();
     meta.enable_constant(rc_b[0]);
     for c in &poseidon_state {
         meta.enable_equality(*c);
     }
-    let poseidon = Pow5Chip::configure::<P128Pow5T3>(meta, poseidon_state, partial_sbox, rc_a, rc_b);
+    let poseidon =
+        Pow5Chip::configure::<P128Pow5T3>(meta, poseidon_state, partial_sbox, rc_a, rc_b);
     (poseidon, poseidon_state)
 }
 
@@ -82,11 +96,18 @@ impl Circuit<pallas::Base> for CertificateCircuit {
     ) -> Result<(), Error> {
         load_plain_range_table(config.lookup_table, &mut layouter)?;
 
-        let ecc_chip = HsEccChip::construct(config.ecc, halo2_gadgets::ecc::chip::CircuitVersion::AnchoredBase);
+        let ecc_chip = HsEccChip::construct(
+            config.ecc,
+            halo2_gadgets::ecc::chip::CircuitVersion::AnchoredBase,
+        );
 
         // Constraint 1: pk = [sk]G (witness + derive + constrain equal).
         let pk_value = self.sk.map(derive_pk);
-        let pk = NonIdentityPoint::new(ecc_chip.clone(), layouter.namespace(|| "witness pk"), pk_value)?;
+        let pk = NonIdentityPoint::new(
+            ecc_chip.clone(),
+            layouter.namespace(|| "witness pk"),
+            pk_value,
+        )?;
         let sk_scalar = ScalarFixed::new(ecc_chip.clone(), layouter.namespace(|| "sk"), self.sk)?;
         let generator = FixedPoint::from_inner(ecc_chip.clone(), HsGenerator);
         let (pk_derived, _) = generator.mul(layouter.namespace(|| "[sk]G"), sk_scalar)?;
@@ -143,7 +164,11 @@ impl Circuit<pallas::Base> for CertificateCircuit {
         )?;
 
         // Constraint 3: Schnorr signature (R, s) verifies under pk over m.
-        let r_point = NonIdentityPoint::new(ecc_chip.clone(), layouter.namespace(|| "witness R"), self.r_point)?;
+        let r_point = NonIdentityPoint::new(
+            ecc_chip.clone(),
+            layouter.namespace(|| "witness R"),
+            self.r_point,
+        )?;
         let e = Hash::<_, _, P128Pow5T3, ConstantLength<3>, WIDTH, RATE>::init(
             Pow5Chip::construct(config.poseidon.clone()),
             layouter.namespace(|| "init poseidon (e)"),
@@ -156,7 +181,8 @@ impl Circuit<pallas::Base> for CertificateCircuit {
         let s_scalar = ScalarFixed::new(ecc_chip.clone(), layouter.namespace(|| "s"), self.s)?;
         let (s_g, _) = generator.mul(layouter.namespace(|| "[s]G"), s_scalar)?;
 
-        let e_scalar = ScalarVar::from_base(ecc_chip.clone(), layouter.namespace(|| "e as scalar"), &e)?;
+        let e_scalar =
+            ScalarVar::from_base(ecc_chip.clone(), layouter.namespace(|| "e as scalar"), &e)?;
         let (e_pk, _) = pk.mul(layouter.namespace(|| "[e]pk"), e_scalar)?;
         let rhs = r_point.add(layouter.namespace(|| "R + [e]pk"), &e_pk)?;
 

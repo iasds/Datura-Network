@@ -12,11 +12,13 @@ use ff::PrimeField;
 use halo2_proofs::arithmetic::CurveAffine;
 use pasta_curves::pallas;
 
-use crate::dlog::{configure_ecc, derive_pk, load_plain_range_table, HsEccChip, HsEccConfig, HsGenerator};
+use crate::dlog::{
+    HsEccChip, HsEccConfig, HsGenerator, configure_ecc, derive_pk, load_plain_range_table,
+};
 use halo2_gadgets::ecc::{FixedPoint, NonIdentityPoint, ScalarFixed, ScalarVar};
 use halo2_gadgets::poseidon::{
-    primitives::{self as poseidon, ConstantLength, P128Pow5T3},
     Hash, Pow5Chip, Pow5Config,
+    primitives::{self as poseidon, ConstantLength, P128Pow5T3},
 };
 use halo2_proofs::{
     circuit::{Layouter, SimpleFloorPlanner, Value},
@@ -37,7 +39,11 @@ pub fn challenge(r_point: pallas::Affine, pk: pallas::Affine, m: pallas::Base) -
 
 // Off-circuit Schnorr signing, for building test fixtures and for Node B.
 // Returns (R, s).
-pub fn sign(sk: pallas::Scalar, k: pallas::Scalar, m: pallas::Base) -> (pallas::Affine, pallas::Scalar) {
+pub fn sign(
+    sk: pallas::Scalar,
+    k: pallas::Scalar,
+    m: pallas::Base,
+) -> (pallas::Affine, pallas::Scalar) {
     let pk = derive_pk(sk);
     let r_point = derive_pk(k); // [k]G, reusing the same fixed generator
     let e = challenge(r_point, pk, m);
@@ -52,8 +58,13 @@ pub fn sign(sk: pallas::Scalar, k: pallas::Scalar, m: pallas::Base) -> (pallas::
 // Off-circuit Schnorr verification: [s]G == R + [e]pk. Used for the RDV node's own endorsement signature on a certificate,
 // where the signer's pk is public. the RDV node's identity hash is Poseidon(pk), already known network-wide: so no
 // zk is needed, just verification equation.
-pub fn verify(pk: pallas::Affine, r_point: pallas::Affine, s: pallas::Scalar, m: pallas::Base) -> bool {
-    use group::{prime::PrimeCurveAffine, Curve};
+pub fn verify(
+    pk: pallas::Affine,
+    r_point: pallas::Affine,
+    s: pallas::Scalar,
+    m: pallas::Base,
+) -> bool {
+    use group::{Curve, prime::PrimeCurveAffine};
     // challenge() reads affine coordinates, which the identity doesn't have;
     // an identity pk or R is invalid in any case.
     if bool::from(pk.is_identity()) || bool::from(r_point.is_identity()) {
@@ -106,16 +117,23 @@ impl Circuit<pallas::Base> for SchnorrCircuit {
             .try_into()
             .unwrap();
         let partial_sbox = meta.advice_column();
-        let rc_a: [Column<halo2_proofs::plonk::Fixed>; WIDTH] =
-            (0..WIDTH).map(|_| meta.fixed_column()).collect::<Vec<_>>().try_into().unwrap();
-        let rc_b: [Column<halo2_proofs::plonk::Fixed>; WIDTH] =
-            (0..WIDTH).map(|_| meta.fixed_column()).collect::<Vec<_>>().try_into().unwrap();
+        let rc_a: [Column<halo2_proofs::plonk::Fixed>; WIDTH] = (0..WIDTH)
+            .map(|_| meta.fixed_column())
+            .collect::<Vec<_>>()
+            .try_into()
+            .unwrap();
+        let rc_b: [Column<halo2_proofs::plonk::Fixed>; WIDTH] = (0..WIDTH)
+            .map(|_| meta.fixed_column())
+            .collect::<Vec<_>>()
+            .try_into()
+            .unwrap();
         meta.enable_constant(rc_b[0]);
         for c in &poseidon_state {
             meta.enable_equality(*c);
         }
 
-        let poseidon = Pow5Chip::configure::<P128Pow5T3>(meta, poseidon_state, partial_sbox, rc_a, rc_b);
+        let poseidon =
+            Pow5Chip::configure::<P128Pow5T3>(meta, poseidon_state, partial_sbox, rc_a, rc_b);
 
         let instance = meta.instance_column();
         meta.enable_equality(instance);
@@ -136,26 +154,43 @@ impl Circuit<pallas::Base> for SchnorrCircuit {
     ) -> Result<(), Error> {
         load_plain_range_table(config.lookup_table, &mut layouter)?;
 
-        let ecc_chip = HsEccChip::construct(config.ecc, halo2_gadgets::ecc::chip::CircuitVersion::AnchoredBase);
+        let ecc_chip = HsEccChip::construct(
+            config.ecc,
+            halo2_gadgets::ecc::chip::CircuitVersion::AnchoredBase,
+        );
 
         // pk = [sk]G: witness pk directly, and separately derive it from sk, constraining the two to match
         // This gives us pk as a NonIdentityPoint, usable as the base of the later variable-base
         // [e]pk multiplication (fixed-base mul only ever returns the possibly-identity Point type).
         let pk_value = self.sk.map(derive_pk);
-        let pk = NonIdentityPoint::new(ecc_chip.clone(), layouter.namespace(|| "witness pk"), pk_value)?;
+        let pk = NonIdentityPoint::new(
+            ecc_chip.clone(),
+            layouter.namespace(|| "witness pk"),
+            pk_value,
+        )?;
         let sk_scalar = ScalarFixed::new(ecc_chip.clone(), layouter.namespace(|| "sk"), self.sk)?;
         let generator = FixedPoint::from_inner(ecc_chip.clone(), HsGenerator);
         let (pk_derived, _) = generator.mul(layouter.namespace(|| "[sk]G"), sk_scalar)?;
         pk.constrain_equal(layouter.namespace(|| "pk == [sk]G"), &pk_derived)?;
 
         // R, witnessed directly (computed off-circuit as [k]G for a nonce k that never appears in this circuit at all).
-        let r_point = NonIdentityPoint::new(ecc_chip.clone(), layouter.namespace(|| "witness R"), self.r_point)?;
+        let r_point = NonIdentityPoint::new(
+            ecc_chip.clone(),
+            layouter.namespace(|| "witness R"),
+            self.r_point,
+        )?;
 
         // m, brought in from the public instance.
         let m_cell = layouter.assign_region(
             || "load m",
             |mut region| {
-                region.assign_advice_from_instance(|| "m", config.instance, 0, config.poseidon_state[0], 0)
+                region.assign_advice_from_instance(
+                    || "m",
+                    config.instance,
+                    0,
+                    config.poseidon_state[0],
+                    0,
+                )
             },
         )?;
 
@@ -175,7 +210,11 @@ impl Circuit<pallas::Base> for SchnorrCircuit {
         let (s_g, _) = generator.mul(layouter.namespace(|| "[s]G"), s_scalar)?;
 
         // R + [e]pk
-        let e_scalar = ScalarVar::from_base(ecc_chip.clone(), layouter.namespace(|| "e as scalar"), &e_cell)?;
+        let e_scalar = ScalarVar::from_base(
+            ecc_chip.clone(),
+            layouter.namespace(|| "e as scalar"),
+            &e_cell,
+        )?;
         let (e_pk, _) = pk.mul(layouter.namespace(|| "[e]pk"), e_scalar)?;
         let rhs = r_point.add(layouter.namespace(|| "R + [e]pk"), &e_pk)?;
 

@@ -8,6 +8,7 @@ mod schnorr;
 use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -18,12 +19,12 @@ use pasta_curves::pallas;
 use rand::rngs::OsRng;
 
 use certificate::{
-    build_certificate, endorse_certificate, verify_certificate, verify_endorsement, Certificate,
+    Certificate, build_certificate, endorse_certificate, verify_certificate, verify_endorsement,
 };
 use circuit::hs_hash;
 use dlog::derive_pk;
 use equix_pow::{create_challenge, get_challenge_effort, solve_challenge, verify_solution};
-use routing::{build_routing_instruction, verify_routing_instruction, RoutingInstruction};
+use routing::{RoutingInstruction, build_routing_instruction, verify_routing_instruction};
 
 // Effort a one-day grant costs; longer grants are priced linearly from this
 // (see required_effort). Doubles as the floor a standalone verifier enforces:
@@ -75,16 +76,78 @@ const MSG_ROUTE: u8 = 6;
 struct RdvEntry {
     cert: Certificate,
     route_target: Option<[u8; 32]>,
+    // Which handshake committed this grant. Sessions are numbered in accept
+    // order, and a hidden service can have two in flight at once
+    // (a renewal opened before the previous session finished, or a retry after a timeout).
+    // Both would key the table on the same hs_hash, so without this
+    // the second session's certificate could replace the first's between the
+    // first's grant and its routing instruction, leaving the entry pairing one
+    // session's certificate with the other's target.
+    session: u64,
 }
 
 type RoutingTable = Arc<Mutex<HashMap<[u8; 32], RdvEntry>>>;
+
+// Commits an accepted grant, replacing any grant already held for the same
+// hidden service. Done under a single lock acquisition so a concurrent session
+// cannot interleave between the read and the write.
+// The new grant inherits the stored routing target: the hidden service just
+// re-proved ownership of the same hash, and the target it installed earlier was
+// authorized by that same key, so a renewal must not end a route
+// that is already carrying traffic. (Node B is free to close the session
+// without sending a fresh instruction.)
+//
+// Returns false without touching the table if a newer session already committed
+// a grant for this hash, so a session that stalls in its proof/PoW phase can't
+// displace a grant issued after it.
+fn commit_grant(table: &RoutingTable, cert: Certificate, session: u64) -> bool {
+    let hs = cert.hs_hash;
+    let mut guard = table.lock().unwrap();
+    let inherited = match guard.get(&hs) {
+        Some(existing) if existing.session > session => return false,
+        Some(existing) => existing.route_target,
+        None => None,
+    };
+    guard.insert(
+        hs,
+        RdvEntry {
+            cert,
+            route_target: inherited,
+            session,
+        },
+    );
+    true
+}
+
+// Attaches this session's routing target to its own grant, returning the
+// grant's expiry on success.
+//
+// Returns None if the entry is gone or now belongs to a newer session. That
+// target was authorized against the certificate this session got endorsed, so
+// writing it onto a certificate from a different session would leave Node A
+// routing a grant that never named its destination. Rejects rather than
+// acknowledging, so Node B learns the instruction did not take and
+// can resubmit it against its current grant.
+fn attach_route(table: &RoutingTable, hs: [u8; 32], target: [u8; 32], session: u64) -> Option<u64> {
+    let mut guard = table.lock().unwrap();
+    match guard.get_mut(&hs) {
+        Some(entry) if entry.session == session => {
+            entry.route_target = Some(target);
+            Some(entry.cert.expires)
+        }
+        _ => None,
+    }
+}
 
 fn read_exact(stream: &mut TcpStream, buf: &mut [u8]) -> bool {
     stream.read_exact(buf).is_ok()
 }
 
 fn now_unix() -> u64 {
-    SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs()
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_secs()
 }
 
 fn parse_hex32(s: &str) -> [u8; 32] {
@@ -137,7 +200,7 @@ fn read_json_frame<T: serde::de::DeserializeOwned>(
 
 // Node A: candidate rendezvous node. Issues PoW challenges, and grants RDV
 // status to whoever submits a valid, freshly-solved certificate binding this
-// node's own hash. Actual routing target (what Node A would route hash X's traffic to) 
+// node's own hash. Actual routing target (what Node A would route hash X's traffic to)
 // is never part of this handshake or shared publicly. This PoC only covers the
 // RDV-agreement step, not packet routing itself
 fn run_node_a(port: u16) {
@@ -149,6 +212,9 @@ fn run_node_a_with_key(port: u16, sk_a: pallas::Scalar) {
     println!("[node-a] identity hash: {}", hex::encode(node_hash));
 
     let table: RoutingTable = Arc::new(Mutex::new(HashMap::new()));
+    // Numbers each handshake in accept order, so concurrent sessions for the
+    // same hidden service stay distinguishable.
+    let sessions = AtomicU64::new(0);
     let listener = TcpListener::bind(format!("0.0.0.0:{port}")).expect("bind failed");
     println!("[node-a:{port}] listening");
 
@@ -168,9 +234,13 @@ fn run_node_a_with_key(port: u16, sk_a: pallas::Scalar) {
         {
             continue;
         }
-        let peer = stream.peer_addr().map(|a| a.to_string()).unwrap_or_default();
+        let peer = stream
+            .peer_addr()
+            .map(|a| a.to_string())
+            .unwrap_or_default();
         let table = table.clone();
-        thread::spawn(move || handle_node_a(&mut stream, &peer, sk_a, node_hash, table));
+        let session = sessions.fetch_add(1, Ordering::Relaxed);
+        thread::spawn(move || handle_node_a(&mut stream, &peer, sk_a, node_hash, table, session));
     }
 }
 
@@ -180,6 +250,7 @@ fn handle_node_a(
     sk_a: pallas::Scalar,
     node_hash: [u8; 32],
     table: RoutingTable,
+    session: u64,
 ) {
     let mut type_buf = [0u8; 1];
     if !read_exact(stream, &mut type_buf) {
@@ -206,7 +277,9 @@ fn handle_node_a(
 
     let effort = required_effort(requested_expires - now);
     let challenge = create_challenge(effort);
-    if stream.write_all(&[MSG_CHALLENGE]).is_err() || stream.write_all(&challenge.to_le_bytes()).is_err() {
+    if stream.write_all(&[MSG_CHALLENGE]).is_err()
+        || stream.write_all(&challenge.to_le_bytes()).is_err()
+    {
         return;
     }
     println!(
@@ -241,7 +314,13 @@ fn handle_node_a(
     }
     cert.endorsement = Some(end);
     let hs = cert.hs_hash;
-    table.lock().unwrap().insert(hs, RdvEntry { cert, route_target: None });
+    if !commit_grant(&table, cert, session) {
+        // A later session already granted this hidden service while this one
+        // was still proving; its grant stands and this session must not touch
+        // the entry (including in the routing phase below).
+        println!("[node-a] {peer}: grant superseded by a newer session, not stored");
+        return;
+    }
 
     // Optional second phase on the same session: the private routing instruction.
     // Node B, now holding confirmation that this node agreed to be its RDV, tells it where to
@@ -251,22 +330,32 @@ fn handle_node_a(
         return;
     };
 
-    if accept_instruction(&instr, hs, node_hash) {
-        // The target stays in this node's table only; it is intentionally
-        // never logged in full or shared anywhere.
-        // The route lives and dies with the certificate that authorizes it.
-        if let Some(entry) = table.lock().unwrap().get_mut(&hs) {
-            entry.route_target = Some(instr.target_node_hash);
-            println!(
-                "[node-a] {peer}: routing instruction accepted for hs_hash {} until {} (target kept private)",
-                hex::encode(instr.hs_hash),
-                entry.cert.expires
-            );
-        }
-        let _ = stream.write_all(&[MSG_ACK]);
-    } else {
+    if !accept_instruction(&instr, hs, node_hash) {
         println!("[node-a] {peer}: routing instruction rejected");
         let _ = stream.write_all(&[MSG_REJECT]);
+        return;
+    }
+
+    // The target stays in this node's table only; it is intentionally
+    // never logged in full or shared anywhere.
+    // The route only lives with the certificate that authorizes it.
+    match attach_route(&table, hs, instr.target_node_hash, session) {
+        Some(expires) => {
+            println!(
+                "[node-a] {peer}: routing instruction accepted for hs_hash {} until {expires} (target kept private)",
+                hex::encode(instr.hs_hash),
+            );
+            let _ = stream.write_all(&[MSG_ACK]);
+        }
+        // Acknowledging here would tell Node B its route is live while the
+        // stored grant belongs to another session, so reject and let it retry.
+        None => {
+            println!(
+                "[node-a] {peer}: routing instruction for hs_hash {} dropped, grant superseded by a newer session",
+                hex::encode(instr.hs_hash),
+            );
+            let _ = stream.write_all(&[MSG_REJECT]);
+        }
     }
 }
 
@@ -355,7 +444,10 @@ fn request_rdv(
         resp_type[0], MSG_REJECT,
         "node-a rejected the request (expires out of its accepted range?)"
     );
-    assert_eq!(resp_type[0], MSG_CHALLENGE, "expected challenge from node-a");
+    assert_eq!(
+        resp_type[0], MSG_CHALLENGE,
+        "expected challenge from node-a"
+    );
     let mut challenge_buf = [0u8; 16];
     stream.read_exact(&mut challenge_buf).unwrap();
     let challenge = u128::from_le_bytes(challenge_buf);
@@ -364,7 +456,9 @@ fn request_rdv(
         get_challenge_effort(challenge)
     );
 
-    let threads = thread::available_parallelism().map(|n| n.get()).unwrap_or(1);
+    let threads = thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(1);
     let solution = solve_challenge(threads, challenge);
     println!("[request-rdv] solved, building certificate...");
 
@@ -380,7 +474,9 @@ fn request_rdv(
 
     let cert_json = serde_json::to_vec(&cert).unwrap();
     stream.write_all(&[MSG_CERTIFICATE]).unwrap();
-    stream.write_all(&(cert_json.len() as u32).to_le_bytes()).unwrap();
+    stream
+        .write_all(&(cert_json.len() as u32).to_le_bytes())
+        .unwrap();
     stream.write_all(&cert_json).unwrap();
 
     let mut resp = [0u8; 1];
@@ -397,11 +493,17 @@ fn request_rdv(
             stream.read_exact(&mut rdv_pk).unwrap();
             stream.read_exact(&mut sig_r).unwrap();
             stream.read_exact(&mut sig_s).unwrap();
-            cert.endorsement = Some(certificate::Endorsement { rdv_pk, sig_r, sig_s });
+            cert.endorsement = Some(certificate::Endorsement {
+                rdv_pk,
+                sig_r,
+                sig_s,
+            });
             if verify_endorsement(&cert) {
                 println!("[request-rdv] certificate accepted, endorsement valid");
             } else {
-                println!("[request-rdv] certificate accepted, but endorsement INVALID. discarding it");
+                println!(
+                    "[request-rdv] certificate accepted, but endorsement INVALID. discarding it"
+                );
                 cert.endorsement = None;
             }
 
@@ -411,15 +513,19 @@ fn request_rdv(
             // can check both artifacts name the same hidden principal. In the
             // demo, absent an explicit target, a random node hash stands in
             // for Node C.
-            let target = target_hash.unwrap_or_else(|| {
-                hs_hash(derive_pk(pallas::Scalar::random(OsRng))).to_repr()
-            });
-            println!("[request-rdv] sending private routing instruction (target: {}...)", &hex::encode(target)[..16]);
+            let target = target_hash
+                .unwrap_or_else(|| hs_hash(derive_pk(pallas::Scalar::random(OsRng))).to_repr());
+            println!(
+                "[request-rdv] sending private routing instruction (target: {}...)",
+                &hex::encode(target)[..16]
+            );
             let instr = build_routing_instruction(sk_b, node_a_hash, target)
                 .expect("hashes validated canonical");
             let instr_json = serde_json::to_vec(&instr).unwrap();
             stream.write_all(&[MSG_ROUTE]).unwrap();
-            stream.write_all(&(instr_json.len() as u32).to_le_bytes()).unwrap();
+            stream
+                .write_all(&(instr_json.len() as u32).to_le_bytes())
+                .unwrap();
             stream.write_all(&instr_json).unwrap();
 
             let mut route_resp = [0u8; 1];
@@ -439,8 +545,8 @@ fn request_rdv(
 // Standalone, stateless verification: a PoC 10.1 requirement
 
 // This checks everything a third party can check from the certificate
-// alone: the ZK proof, the PoW solution against the embedded challenge, 
-// current-time expiry, and the RDV node's endorsement. Only a 
+// alone: the ZK proof, the PoW solution against the embedded challenge,
+// current-time expiry, and the RDV node's endorsement. Only a
 // proof-valid answer comes from verify_certificate; the rest would be
 // silently skipped if this printed "proof valid: true" alone.
 
@@ -448,7 +554,7 @@ fn request_rdv(
 // pow_challenge is whatever the prover chose, so a colluding HS + RDV pair could
 // try to mint a long-lived grant while paying for a short one. The certificate
 // carries issued_at (bound into the RDV node's endorsement), so a third
-// party can recompute the exact duration price: required_effort(expires - issued_at). 
+// party can recompute the exact duration price: required_effort(expires - issued_at).
 // Because issued_at must be in the past, a far-future expires forces
 // a proportionally large window --> the pair cannot understate what they owe. We
 // still keep the one-day floor for degenerate windows.
@@ -462,9 +568,8 @@ fn verify_cert_file(path: &str) {
     let issued_ok = cert.issued_at <= now + CLOCK_SKEW_SECS;
     let priced_window = cert.expires.saturating_sub(cert.issued_at);
     let required = required_effort(priced_window).max(MIN_CHALLENGE_DIFFICULTY);
-    let pow_ok = issued_ok
-        && effort >= required
-        && verify_solution(cert.pow_challenge, cert.pow_solution);
+    let pow_ok =
+        issued_ok && effort >= required && verify_solution(cert.pow_challenge, cert.pow_solution);
     let expired = cert.expires <= now;
     let proof_ok = verify_certificate(&cert);
     let endorsement_ok = verify_endorsement(&cert);
@@ -472,18 +577,29 @@ fn verify_cert_file(path: &str) {
     println!("hs_hash:        {}", hex::encode(cert.hs_hash));
     println!("rdv_node_hash:  {}", hex::encode(cert.rdv_node_hash));
     println!("issued_at:      {}", cert.issued_at);
-    println!("expires:        {} ({})", cert.expires, if expired { "EXPIRED" } else { "not expired" });
+    println!(
+        "expires:        {} ({})",
+        cert.expires,
+        if expired { "EXPIRED" } else { "not expired" }
+    );
     println!("pow effort:     {effort} (required {required} for a {priced_window}s window)");
     println!("pow valid:      {pow_ok}");
     println!("proof valid:    {proof_ok}");
-    println!("endorsement:    {}", if cert.endorsement.is_some() {
-        if endorsement_ok { "valid" } else { "INVALID" }
-    } else {
-        "absent"
-    });
+    println!(
+        "endorsement:    {}",
+        if cert.endorsement.is_some() {
+            if endorsement_ok { "valid" } else { "INVALID" }
+        } else {
+            "absent"
+        }
+    );
     println!(
         "certificate:    {}",
-        if pow_ok && !expired && proof_ok && endorsement_ok { "VALID" } else { "INVALID" }
+        if pow_ok && !expired && proof_ok && endorsement_ok {
+            "VALID"
+        } else {
+            "INVALID"
+        }
     );
 }
 
@@ -501,7 +617,9 @@ fn run_test() {
     thread::spawn(move || run_node_a_with_key(port_a, sk_a));
     thread::sleep(Duration::from_millis(150));
 
-    println!("\nstep 1: Node B requests RDV status, submits a certificate, then the private routing instruction");
+    println!(
+        "\nstep 1: Node B requests RDV status, submits a certificate, then the private routing instruction"
+    );
     let cert = request_rdv(&addr_a, &node_a_hash, now_unix() + 86_400, None);
 
     thread::sleep(Duration::from_millis(200));
@@ -541,7 +659,9 @@ fn main() {
             eprintln!("unknown command: {other}");
             eprintln!("usage:");
             eprintln!("  hs-certificates node-a       [port]");
-            eprintln!("  hs-certificates request-rdv  <node-a-addr> <node-a-hash-hex> [expires-unix-ts] [target-node-hash-hex]");
+            eprintln!(
+                "  hs-certificates request-rdv  <node-a-addr> <node-a-hash-hex> [expires-unix-ts] [target-node-hash-hex]"
+            );
             eprintln!("  hs-certificates verify       <cert-file>");
             eprintln!("  hs-certificates test");
         }
@@ -566,7 +686,10 @@ mod tests {
     fn effort_scales_linearly_with_requested_lifetime() {
         assert_eq!(required_effort(86_400), MIN_CHALLENGE_DIFFICULTY);
         // Partial days round up: 25h costs 2 days.
-        assert_eq!(required_effort(86_400 + 3_600), 2 * MIN_CHALLENGE_DIFFICULTY);
+        assert_eq!(
+            required_effort(86_400 + 3_600),
+            2 * MIN_CHALLENGE_DIFFICULTY
+        );
         assert_eq!(required_effort(30 * 86_400), 30 * MIN_CHALLENGE_DIFFICULTY);
         // Degenerate zero-length request still costs a day, never a free challenge.
         assert_eq!(required_effort(0), MIN_CHALLENGE_DIFFICULTY);
@@ -581,7 +704,7 @@ mod tests {
 
     #[test]
     fn standalone_rejects_understated_duration_price() {
-        // a grant claiming a long window while paying only one day's PoW. 
+        // a grant claiming a long window while paying only one day's PoW.
         // With issued_at bound in, the standalone price check required_effort(expires - issued_at) is not met by a one-day
         // solution, so a verifier rejects it.
         let sk_b = pallas::Scalar::random(OsRng);
@@ -607,7 +730,8 @@ mod tests {
         let (_, node_hash, challenge, issued_at, expires) = setup();
         let solution = solve_challenge(1, challenge);
         let sk_b = pallas::Scalar::random(OsRng);
-        let cert = build_certificate(sk_b, node_hash, issued_at, expires, challenge, solution).unwrap();
+        let cert =
+            build_certificate(sk_b, node_hash, issued_at, expires, challenge, solution).unwrap();
 
         assert!(accept_certificate(&cert, node_hash, challenge, expires));
     }
@@ -640,7 +764,8 @@ mod tests {
         let (_, node_hash, challenge, issued_at, expires) = setup();
         let sk_b = pallas::Scalar::random(OsRng);
         // Garbage solution bytes, never actually solved.
-        let cert = build_certificate(sk_b, node_hash, issued_at, expires, challenge, [0u8; 24]).unwrap();
+        let cert =
+            build_certificate(sk_b, node_hash, issued_at, expires, challenge, [0u8; 24]).unwrap();
 
         assert!(!accept_certificate(&cert, node_hash, challenge, expires));
     }
@@ -650,7 +775,8 @@ mod tests {
         let (_, node_hash, challenge, issued_at, expires) = setup();
         let solution = solve_challenge(1, challenge);
         let sk_b = pallas::Scalar::random(OsRng);
-        let mut cert = build_certificate(sk_b, node_hash, issued_at, expires, challenge, solution).unwrap();
+        let mut cert =
+            build_certificate(sk_b, node_hash, issued_at, expires, challenge, solution).unwrap();
 
         // A resolver or the RDV node itself tampering with which node the
         // certificate was actually made out to, after the fact.
@@ -667,7 +793,15 @@ mod tests {
         let (_, node_hash, challenge, issued_at, expires) = setup();
         let solution = solve_challenge(1, challenge);
         let sk_b = pallas::Scalar::random(OsRng);
-        let cert = build_certificate(sk_b, node_hash, issued_at, expires + 7 * 86_400, challenge, solution).unwrap();
+        let cert = build_certificate(
+            sk_b,
+            node_hash,
+            issued_at,
+            expires + 7 * 86_400,
+            challenge,
+            solution,
+        )
+        .unwrap();
 
         assert!(!accept_certificate(&cert, node_hash, challenge, expires));
     }
@@ -677,7 +811,8 @@ mod tests {
         let (sk_a, node_hash, challenge, issued_at, expires) = setup();
         let solution = solve_challenge(1, challenge);
         let sk_b = pallas::Scalar::random(OsRng);
-        let mut cert = build_certificate(sk_b, node_hash, issued_at, expires, challenge, solution).unwrap();
+        let mut cert =
+            build_certificate(sk_b, node_hash, issued_at, expires, challenge, solution).unwrap();
         assert!(accept_certificate(&cert, node_hash, challenge, expires));
         cert.endorsement = Some(endorse_certificate(sk_a, &cert));
 
@@ -707,7 +842,8 @@ mod tests {
         // Already-expired timestamp, with the requested expires matching so
         // it's specifically the expiry check that rejects.
         let expired = now_unix() - 3600;
-        let cert = build_certificate(sk_b, node_hash, now_unix(), expired, challenge, solution).unwrap();
+        let cert =
+            build_certificate(sk_b, node_hash, now_unix(), expired, challenge, solution).unwrap();
 
         assert!(!accept_certificate(&cert, node_hash, challenge, expired));
     }
@@ -720,7 +856,8 @@ mod tests {
         // Even if the request phase were bypassed, the acceptance check
         // itself refuses grants past the cap.
         let too_far = now_unix() + MAX_CERT_LIFETIME_SECS + 3600;
-        let cert = build_certificate(sk_b, node_hash, now_unix(), too_far, challenge, solution).unwrap();
+        let cert =
+            build_certificate(sk_b, node_hash, now_unix(), too_far, challenge, solution).unwrap();
 
         assert!(!accept_certificate(&cert, node_hash, challenge, too_far));
     }
@@ -730,7 +867,8 @@ mod tests {
         let (_, node_hash, challenge, issued_at, expires) = setup();
         let solution = solve_challenge(1, challenge);
         let sk_b = pallas::Scalar::random(OsRng);
-        let cert = build_certificate(sk_b, node_hash, issued_at, expires, challenge, solution).unwrap();
+        let cert =
+            build_certificate(sk_b, node_hash, issued_at, expires, challenge, solution).unwrap();
         assert!(accept_certificate(&cert, node_hash, challenge, expires));
 
         // Same sk as the certificate: this is the honest flow.
@@ -748,7 +886,8 @@ mod tests {
         let (_, node_hash, challenge, issued_at, expires) = setup();
         let solution = solve_challenge(1, challenge);
         let sk_b = pallas::Scalar::random(OsRng);
-        let cert = build_certificate(sk_b, node_hash, issued_at, expires, challenge, solution).unwrap();
+        let cert =
+            build_certificate(sk_b, node_hash, issued_at, expires, challenge, solution).unwrap();
 
         let sk_attacker = pallas::Scalar::random(OsRng);
         let target = hs_hash(derive_pk(pallas::Scalar::random(OsRng))).to_repr();
@@ -761,6 +900,105 @@ mod tests {
         assert!(!accept_instruction(&forged, cert.hs_hash, node_hash));
     }
 
+    // These exercise commit_grant / attach_route directly: what matters is which session each write belongs
+    // to, not the content, which accept_certificate and
+    // accept_instruction have already cleared by the time either is called.
+    fn dummy_cert(hs: [u8; 32], expires: u64) -> Certificate {
+        Certificate {
+            hs_hash: hs,
+            rdv_node_hash: [0u8; 32],
+            issued_at: 0,
+            expires,
+            pow_challenge: 0,
+            pow_solution: [0u8; 24],
+            proof: Vec::new(),
+            endorsement: None,
+        }
+    }
+
+    #[test]
+    fn concurrent_session_cannot_attach_route_to_another_sessions_grant() {
+        // Two handshakes for one hidden service overlap (a renewal opened
+        // before the first finished, or a retry after a timeout). Session 1 is
+        // endorsed, session 2's certificate then supersedes it, and only then
+        // does session 1 present its routing instruction. That target was
+        // authorized against session 1's certificate, so pairing it with
+        // session 2's would leave Node A routing under a grant that never
+        // named that destination.
+        let table: RoutingTable = Arc::new(Mutex::new(HashMap::new()));
+        let hs = [1u8; 32];
+
+        assert!(commit_grant(&table, dummy_cert(hs, 1_000), 1));
+        assert!(commit_grant(&table, dummy_cert(hs, 2_000), 2));
+
+        // Refused, so Node B is told the instruction did not take.
+        assert_eq!(attach_route(&table, hs, [0xAAu8; 32], 1), None);
+
+        let guard = table.lock().unwrap();
+        let entry = guard.get(&hs).unwrap();
+        assert_eq!(entry.session, 2);
+        assert_eq!(entry.cert.expires, 2_000);
+        assert_eq!(entry.route_target, None);
+    }
+
+    #[test]
+    fn renewal_keeps_the_route_already_installed() {
+        // Node B may close after the grant without resending an instruction,
+        // which is exactly what a renewal looks like. The route it installed
+        // earlier was authorized by the same key that just re-proved ownership,
+        // so it must survive; dropping it would stop live traffic.
+        let table: RoutingTable = Arc::new(Mutex::new(HashMap::new()));
+        let hs = [2u8; 32];
+        let target = [0xBBu8; 32];
+
+        assert!(commit_grant(&table, dummy_cert(hs, 1_000), 1));
+        assert_eq!(attach_route(&table, hs, target, 1), Some(1_000));
+        assert!(commit_grant(&table, dummy_cert(hs, 2_000), 2));
+
+        let guard = table.lock().unwrap();
+        let entry = guard.get(&hs).unwrap();
+        assert_eq!(entry.cert.expires, 2_000, "renewed certificate is stored");
+        assert_eq!(entry.route_target, Some(target), "route survives renewal");
+    }
+
+    #[test]
+    fn stalled_older_session_cannot_displace_a_newer_grant() {
+        // Sessions are numbered at accept time but finish out of order: a slow
+        // PoW/proof phase can land session 1's grant after session 2's.
+        let table: RoutingTable = Arc::new(Mutex::new(HashMap::new()));
+        let hs = [3u8; 32];
+        let target = [0xCCu8; 32];
+
+        assert!(commit_grant(&table, dummy_cert(hs, 2_000), 2));
+        assert_eq!(attach_route(&table, hs, target, 2), Some(2_000));
+
+        assert!(!commit_grant(&table, dummy_cert(hs, 1_000), 1));
+        assert_eq!(attach_route(&table, hs, [0xDDu8; 32], 1), None);
+
+        let guard = table.lock().unwrap();
+        let entry = guard.get(&hs).unwrap();
+        assert_eq!(entry.session, 2);
+        assert_eq!(entry.cert.expires, 2_000);
+        assert_eq!(entry.route_target, Some(target));
+    }
+
+    #[test]
+    fn grants_for_distinct_hidden_services_are_independent() {
+        // Session guard is per-entry, so unrelated hidden services
+        // handshaking concurrently never interfere with each other.
+        let table: RoutingTable = Arc::new(Mutex::new(HashMap::new()));
+        let (hs1, hs2) = ([4u8; 32], [5u8; 32]);
+
+        assert!(commit_grant(&table, dummy_cert(hs1, 1_000), 1));
+        assert!(commit_grant(&table, dummy_cert(hs2, 1_000), 2));
+        assert_eq!(attach_route(&table, hs1, [0xEEu8; 32], 1), Some(1_000));
+        assert_eq!(attach_route(&table, hs2, [0xFFu8; 32], 2), Some(1_000));
+
+        let guard = table.lock().unwrap();
+        assert_eq!(guard.get(&hs1).unwrap().route_target, Some([0xEEu8; 32]));
+        assert_eq!(guard.get(&hs2).unwrap().route_target, Some([0xFFu8; 32]));
+    }
+
     #[test]
     fn routing_instruction_for_wrong_rdv_node_rejected() {
         // An instruction made out to some other RDV node can't be submitted
@@ -768,7 +1006,8 @@ mod tests {
         let (_, node_hash, challenge, issued_at, expires) = setup();
         let solution = solve_challenge(1, challenge);
         let sk_b = pallas::Scalar::random(OsRng);
-        let cert = build_certificate(sk_b, node_hash, issued_at, expires, challenge, solution).unwrap();
+        let cert =
+            build_certificate(sk_b, node_hash, issued_at, expires, challenge, solution).unwrap();
 
         let other_node = hs_hash(derive_pk(pallas::Scalar::random(OsRng))).to_repr();
         let target = hs_hash(derive_pk(pallas::Scalar::random(OsRng))).to_repr();

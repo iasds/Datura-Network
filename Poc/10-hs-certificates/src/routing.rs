@@ -49,7 +49,12 @@ pub fn build_routing_instruction(
     let k = pallas::Scalar::random(OsRng);
     let (r_point, s) = sign(sk, k, m);
 
-    let proof = prove_signed_envelope(sk, r_point, s, [hs_hash_fp, rdv_fp, target_fp, route_domain()]);
+    let proof = prove_signed_envelope(
+        sk,
+        r_point,
+        s,
+        [hs_hash_fp, rdv_fp, target_fp, route_domain()],
+    );
 
     Some(RoutingInstruction {
         hs_hash: hs_hash_fp.to_repr(),
@@ -82,7 +87,7 @@ pub fn verify_routing_instruction(instr: &RoutingInstruction) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::certificate::{build_certificate, u128_to_fp, verify_signed_envelope, Certificate};
+    use crate::certificate::{Certificate, build_certificate, u128_to_fp, verify_signed_envelope};
 
     fn random_hash() -> [u8; 32] {
         hs_hash(derive_pk(pallas::Scalar::random(OsRng))).to_repr()
@@ -132,7 +137,15 @@ mod tests {
         // certificate's proof as an instruction must fail even when the other three fields are copied over.
         let sk = pallas::Scalar::random(OsRng);
         let rdv = random_hash();
-        let cert = build_certificate(sk, rdv, 1_800_000_000 - 86_400, 1_800_000_000, 42, [7u8; 24]).unwrap();
+        let cert = build_certificate(
+            sk,
+            rdv,
+            1_800_000_000 - 86_400,
+            1_800_000_000,
+            42,
+            [7u8; 24],
+        )
+        .unwrap();
 
         let forged = RoutingInstruction {
             hs_hash: cert.hs_hash,
@@ -152,7 +165,7 @@ mod tests {
         let target = random_hash();
         let instr = build_routing_instruction(sk, rdv, target).unwrap();
 
-        // Try to pass the instruction's proof off as a certificate whose expires slot carries the target. 
+        // Try to pass the instruction's proof off as a certificate whose expires slot carries the target.
         // verify_signed_envelope with the certificate-shaped instance must reject: slot 3 differs (u128
         // challenge vs ROUTE_DOMAIN) for every possible challenge value.
         let hs_fp = pallas::Base::from_repr(instr.hs_hash).unwrap();

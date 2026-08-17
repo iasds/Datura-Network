@@ -94,7 +94,7 @@ bytes. Every value fed to it (`H`, `N`, `T`, `C`) must already be a canonical fi
 encoding. That holds automatically for values this scheme produces (they're Poseidon
 outputs), but not for an arbitrary 32-byte SHA hash from elsewhere: a chunk of random
 32-byte strings aren't valid Pallas field elements. This is why the
-network adopted `Poseidon(pk)` as the canonical identifier (section 8): every identifier
+network adopted `Poseidon(pk)` as the canonical identifier (section 9): every identifier
 is a valid field element by construction.
 
 **Signature: Schnorr.** Verification is `[s]G = R + [e]pk`, pure point arithmetic, which
@@ -104,6 +104,45 @@ here the verifying key `pk` is exactly what we're hiding, so the check has to si
 circuit alongside the dlog and hash constraints. (Zcash's Orchard verifies spend
 authorizations *outside* its circuit for the opposite reason: it doesn't hide the key.
 `schnorr.rs`'s module doc gives the gadget sequence.)
+
+### The other keypair
+
+Pallas solves the circuit problem and creates an addressing issue. A user is given a `.dn`
+address, which is an **Ed25519** key in base32; the certificate names the HS by `H`, a
+Pallas hash. Nothing so far connects the two, so a client holding an address cannot tell
+which certificates are its own.
+
+But a principal holds **both** keypairs and signs each with the other:
+
+```
+Ed25519 key ──signs──> Pallas public key
+Pallas key  ──signs──> Ed25519 public key
+```
+
+Check both directions and you know one party holds both secrets (the two keys are
+one principal). One direction doesn't work: an Ed25519 signature over someone else's
+Pallas key is something anyone holding the address key can produce for a Pallas key they
+do not control. The two together are only producible by a holder of both.
+
+That pair of signatures plus the Pallas public key is the **address binding**
+(`identity.rs`), and it is what turns an address into a hash: recover the Ed25519 key
+from the address, verify both directions against the claimed Pallas key, and compute
+`Poseidon(pallas_pk)`. A directory that hands you a binding cannot swap in its own Pallas
+key, because it would have to forge an Ed25519 signature under a key it does not hold.
+
+**The binding is not part of the certificate.** The Ed25519 public key *is* the address,
+so putting the binding in the artifact the RDV node receives would hand it the identity
+the whole proof exists to hide. So the two artifacts have different audiences: the
+certificate is public and says only `H`; the binding goes only to parties already told
+the address. That split is what lets a client verify what an RDV node cannot.
+
+Be careful about how far that goes. `H` is a fixed function of the identity, so the
+address --> `H` direction is open to anyone with the binding, and anyone who knows an
+address can get its binding. A RDV node therefore cannot go *backwards* from a certificate
+to an address it never knew, but it can go *forwards*: compute `H` for an address it
+wants to block and refuse that hash forever. Hiding the key stops profiling, not a censor
+working from a list. The README's "What this does not block" section covers why fixing
+it needs a per-epoch identifier rather than a fixed one.
 
 ---
 
@@ -268,6 +307,12 @@ statelessly. With no contact with A or B, and no session context. That stateless
 is what PoC 10.1 and 11.1 build on. (The routing instruction is *not* part of this: it
 stays private between B and A by design.)
 
+**8. Resolve, if you know the address.** A client that was given B's `.dn` address does one
+more step A can't: `resolve_hs_hash(address, binding)` produces `H` from the address, and
+matching it against the certificate's `hs_hash` shows that this certificate is the
+one for the service. The `test` command runs this twice, once with the
+right address and once with an unrelated one.
+
 ---
 
 ## 9. Scope and consumers
@@ -278,15 +323,22 @@ This PoC is certificate production and verification. Its neighbors:
   currently lets any PoW-paying node install a routing rule for any hash; 11.1 requires a
   valid certificate whose `H` matches the registered hash and whose `N` is the registering
   node. 11.1's rule payload comes from the instruction's `target_node_hash`.
-- **PoC 10.1: encrypted descriptor (#117).** Owns the remaining addressing piece:
-  resolving a `.dn` address to the Pallas hash `H`, via a descriptor also carrying the
-  Ed25519<-->Pallas cross-signature.
+- **PoC 10.1: encrypted descriptor (#117).** Takes the binding from here and solves the
+  distribution problem this PoC leaves open: how a client obtains a binding for an
+  address without the directory serving it learning which hidden service is being looked
+  up. `address.rs` and `identity.rs` are meant to be lifted into it as-is.
 
-On identity: the Pallas key here isn't PoC-local anymore. Every pricipal will get **two cross-signed keypairs**:
-Ed25519 for `.dn` addresses / E2EE / plain signatures, and Pallas for these certificates. Each signs the
-other's public key. The canonical hashring position is `Poseidon(pallas_pk.x, pallas_pk.y)`. 
-(i.e. the `H` this PoC computes *is* the network identifier used by the hashring (PoC 8),
-routing tables (PoC 11), and certificate fields alike.)
+On identity: the Pallas key here isn't PoC-local anymore. Every principal has two
+cross-signed keypairs (section 3): Ed25519 for `.dn` addresses / E2EE / plain
+signatures, and Pallas for these certificates. The canonical hashring position is
+`Poseidon(pallas_pk.x, pallas_pk.y)`, i.e. the `H` this PoC computes is the network
+identifier used by the hashring (PoC 8), routing tables (PoC 11), and certificate fields
+alike.
+
+Two gaps remain. The binding has to reach the client
+somehow, and handing it out in the clear reintroduces the correlation the encryption in
+10.1 removes. Keys are also generated fresh per run and held only in memory, so a `.dn`
+address does not survive a restart.
 
 Explicitly out of scope: actual packet relaying (PoC 11), the descriptor (PoC 10.1), and
 any proof-size/proving-time optimization. Also note `halo2_gadgets` is relativley new

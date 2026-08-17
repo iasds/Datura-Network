@@ -1,7 +1,9 @@
+mod address;
 mod certificate;
 mod circuit;
 mod dlog;
 mod equix_pow;
+mod identity;
 mod routing;
 mod schnorr;
 
@@ -24,6 +26,10 @@ use certificate::{
 use circuit::hs_hash;
 use dlog::derive_pk;
 use equix_pow::{create_challenge, get_challenge_effort, solve_challenge, verify_solution};
+use identity::{
+    AddressBinding, IdentityKeys, canonical_hash, dn_address, generate_identity, publish_binding,
+    resolve_hs_hash,
+};
 use routing::{RoutingInstruction, build_routing_instruction, verify_routing_instruction};
 
 // Effort a one-day grant costs; longer grants are priced linearly from this
@@ -204,11 +210,17 @@ fn read_json_frame<T: serde::de::DeserializeOwned>(
 // is never part of this handshake or shared publicly. This PoC only covers the
 // RDV-agreement step, not packet routing itself
 fn run_node_a(port: u16) {
-    run_node_a_with_key(port, pallas::Scalar::random(OsRng));
+    run_node_a_with_identity(port, generate_identity());
 }
 
-fn run_node_a_with_key(port: u16, sk_a: pallas::Scalar) {
-    let node_hash: [u8; 32] = hs_hash(derive_pk(sk_a)).to_repr();
+// every node generates a default hidden service on startup, so it holds an
+// Ed25519 key (.dn address) and a pallas key whose Poseidon hash is both
+// its network identifier and its hashring position. Only the pallas half is
+// used in the handshake below
+fn run_node_a_with_identity(port: u16, id_a: IdentityKeys) {
+    let sk_a = id_a.pallas_sk;
+    let node_hash: [u8; 32] = canonical_hash(&id_a);
+    println!("[node-a] address:       {}", dn_address(&id_a));
     println!("[node-a] identity hash: {}", hex::encode(node_hash));
 
     let table: RoutingTable = Arc::new(Mutex::new(HashMap::new()));
@@ -422,12 +434,16 @@ fn accept_instruction(
 // for it), solves the PoW challenge, submits a certificate proving it owns
 // the key behind hs_hash without revealing that key to Node A, and finally
 // hands over the private routing instruction naming the actual target.
+//
+// Returns the certificate along with the hs's .dn address and the
+// address binding a client needs. The address
+// and binding are not sent to A.
 fn request_rdv(
     node_a_addr: &str,
     node_a_hash_hex: &str,
     expires: u64,
     target_hash: Option<[u8; 32]>,
-) -> Certificate {
+) -> (Certificate, String, AddressBinding) {
     let node_a_hash = parse_hex32(node_a_hash_hex);
 
     println!("[request-rdv] connecting to node-a at {node_a_addr}");
@@ -462,9 +478,17 @@ fn request_rdv(
     let solution = solve_challenge(threads, challenge);
     println!("[request-rdv] solved, building certificate...");
 
-    let sk_b = pallas::Scalar::random(OsRng);
-    let hs_hash_hex = hex::encode(hs_hash(derive_pk(sk_b)).to_repr());
-    println!("[request-rdv] hidden service hash: {hs_hash_hex}");
+    // The hidden service holds both keys. The .dn address
+    // (Ed25519) is what a user is given and what 9's E2EE uses; the pallas
+    // key is what the certificate proves ownership of. Node A is told
+    // only the Poseidon hash of the pallas key.
+    let id_b = generate_identity();
+    let sk_b = id_b.pallas_sk;
+    let hs_addr = dn_address(&id_b);
+    let binding = publish_binding(&id_b);
+    let hs_hash_hex = hex::encode(canonical_hash(&id_b));
+    println!("[request-rdv] hidden service address: {hs_addr}");
+    println!("[request-rdv] hidden service hash:    {hs_hash_hex}");
 
     // Record the issue time so a verifier can price the grant's full
     // window. node_a_hash was validated canonical in parse_hex32, so the build never returns None here.
@@ -539,7 +563,40 @@ fn request_rdv(
         other => println!("[request-rdv] unexpected response byte {other}"),
     }
 
-    cert
+    (cert, hs_addr, binding)
+}
+
+// A certificate names the hidden service by its canonical hash, which is
+// meaningless to a client with a .dn address. Resolve the address to its canonical hash through
+// the cross-signatures, then compare. Shows the certificate's ZK proof
+// was produced by the holder of the pallas key that this specific address
+// cross-signed.
+//
+// Only a party that already knows the address can run this. Node A is never
+// given the address or the binding. It can still ask for addresses it already
+// knows and wants to censor (!)
+fn check_address_binding(cert: &Certificate, dn_addr: &str, binding: &AddressBinding) -> bool {
+    match resolve_hs_hash(dn_addr, binding) {
+        Ok(resolved) if resolved == cert.hs_hash => {
+            println!("address:        {dn_addr}");
+            println!("binding:        valid, resolves to this certificate's hs_hash");
+            true
+        }
+        Ok(resolved) => {
+            println!("address:        {dn_addr}");
+            println!(
+                "binding:        MISMATCH, address resolves to {} not {}",
+                hex::encode(resolved),
+                hex::encode(cert.hs_hash)
+            );
+            false
+        }
+        Err(e) => {
+            println!("address:        {dn_addr}");
+            println!("binding:        INVALID ({e})");
+            false
+        }
+    }
 }
 
 // Standalone, stateless verification: a PoC 10.1 requirement
@@ -558,7 +615,11 @@ fn request_rdv(
 // Because issued_at must be in the past, a far-future expires forces
 // a proportionally large window --> the pair cannot understate what they owe. We
 // still keep the one-day floor for degenerate windows.
-fn verify_cert_file(path: &str) {
+
+// `address_check` (a .dn address and the path to its binding) adds whether this certificate belongs to that
+// address. It does not feed into any of the checks above (a
+// certificate can be authentic and not be asked for)
+fn verify_cert_file(path: &str, address_check: Option<(&str, &str)>) {
     let bytes = std::fs::read(path).expect("failed to read certificate file");
     let cert: Certificate = serde_json::from_slice(&bytes).expect("invalid certificate JSON");
     let now = now_unix();
@@ -593,41 +654,85 @@ fn verify_cert_file(path: &str) {
             "absent"
         }
     );
+
+    // Optional, and only possible if it knows the address:
+    // confirm this certificate belongs to the hidden service asked
+    // about, rather than some other hash that verifies.
+    let binding_ok = address_check.map(|(dn_addr, binding_path)| {
+        let raw: Vec<u8> = std::fs::read(binding_path).expect("failed to read binding file");
+        let binding: AddressBinding = serde_json::from_slice(&raw).expect("invalid binding JSON");
+        check_address_binding(&cert, dn_addr, &binding)
+    });
+
+    // An INVALID certificate means whoever
+    // served it produced or relayed a forgery --> distrust
+    // that node. A valid certificate that is not
+    // this address's is somebody else's grant, and doesn't relate to
+    // the node that sent it.
+    let cert_ok = pow_ok && !expired && proof_ok && endorsement_ok;
     println!(
         "certificate:    {}",
-        if pow_ok && !expired && proof_ok && endorsement_ok {
-            "VALID"
-        } else {
-            "INVALID"
-        }
+        if cert_ok { "VALID" } else { "INVALID" }
     );
+    if let Some(ok) = binding_ok {
+        println!(
+            "for address:    {}",
+            match (ok, cert_ok) {
+                (true, _) => "yes",
+                (false, true) => "no (authentic certificate, but not this address's)",
+                (false, false) => "no",
+            }
+        );
+    }
 }
 
 fn run_test() {
     let port_a: u16 = 9120;
     let addr_a = format!("127.0.0.1:{port_a}");
 
-    // In the self-contained demo we pick node-a's key ourselves so we can
-    // compute its identity hash directly, rather than needing an operator to
+    // In the self-contained demo we generate node-a's identity ourselves so we
+    // can compute its identity hash directly, rather than needing an operator to
     // read it off node-a's log. Node A's own privacy guarantees are unaffected either way:
-    // the hash is meant to be public, only the underlying key is secret.
-    let sk_a = pallas::Scalar::random(OsRng);
-    let node_a_hash = hex::encode(hs_hash(derive_pk(sk_a)).to_repr());
+    // the hash is meant to be public, only the underlying keys are secret.
+    let id_a = generate_identity();
+    let node_a_hash = hex::encode(canonical_hash(&id_a));
 
-    thread::spawn(move || run_node_a_with_key(port_a, sk_a));
+    thread::spawn(move || run_node_a_with_identity(port_a, id_a));
     thread::sleep(Duration::from_millis(150));
 
     println!(
         "\nstep 1: Node B requests RDV status, submits a certificate, then the private routing instruction"
     );
-    let cert = request_rdv(&addr_a, &node_a_hash, now_unix() + 86_400, None);
+    let (cert, hs_addr, binding) = request_rdv(&addr_a, &node_a_hash, now_unix() + 86_400, None);
 
     thread::sleep(Duration::from_millis(200));
 
     println!("\nstep 2: save the certificate and re-verify it completely standalone");
     let path = std::env::temp_dir().join("poc10_test_cert.json");
     std::fs::write(&path, serde_json::to_vec_pretty(&cert).unwrap()).unwrap();
-    verify_cert_file(path.to_str().unwrap());
+    verify_cert_file(path.to_str().unwrap(), None);
+
+    // Node A only ever saw the hash. A client that was given the address can do
+    // more: bind that address to the hash through the cross-signatures
+    // and confirm the certificate is the one it was looking for.
+    println!(
+        "\nstep 3: a client that knows the .dn address checks the certificate belongs to them"
+    );
+    let binding_path = std::env::temp_dir().join("poc10_test_binding.json");
+    std::fs::write(&binding_path, serde_json::to_vec_pretty(&binding).unwrap()).unwrap();
+    verify_cert_file(
+        path.to_str().unwrap(),
+        Some((&hs_addr, binding_path.to_str().unwrap())),
+    );
+
+    // The same check under an unrelated address must fail, otherwise the
+    // binding wouldn't prove which hidden service this is
+    println!("\nstep 4: the same certificate checked against an unrelated address");
+    let unrelated_address = dn_address(&generate_identity());
+    verify_cert_file(
+        path.to_str().unwrap(),
+        Some((&unrelated_address, binding_path.to_str().unwrap())),
+    );
 
     println!("\ntest complete");
 }
@@ -648,11 +753,42 @@ fn main() {
                 .map(|s| s.parse().expect("expires must be a unix timestamp"))
                 .unwrap_or_else(|| now_unix() + 86_400);
             let target = args.get(5).map(|s| parse_hex32(s));
-            request_rdv(addr, hash, expires, target);
+            let (cert, hs_addr, binding) = request_rdv(addr, hash, expires, target);
+
+            // Write both halves out so `verify` can be run against them.
+            // certificate is public; the binding goes to who
+            // already have the address.
+            let cert_path = std::env::temp_dir().join("poc10_cert.json");
+            let binding_path = std::env::temp_dir().join("poc10_binding.json");
+            std::fs::write(&cert_path, serde_json::to_vec_pretty(&cert).unwrap()).unwrap();
+            std::fs::write(&binding_path, serde_json::to_vec_pretty(&binding).unwrap()).unwrap();
+            println!(
+                "[request-rdv] certificate written to {}",
+                cert_path.display()
+            );
+            println!(
+                "[request-rdv] address binding written to {}",
+                binding_path.display()
+            );
+            println!(
+                "[request-rdv] verify with: hs-certificates verify {} {hs_addr} {}",
+                cert_path.display(),
+                binding_path.display()
+            );
         }
         Some("verify") => {
             let path = args.get(2).expect("missing certificate file path");
-            verify_cert_file(path);
+            // Both or neither: checking an address without its binding, or a
+            // binding without the address it is supposed to belong to, is not
+            // a check
+            let address_check = match (args.get(3), args.get(4)) {
+                (Some(addr), Some(binding)) => Some((addr.as_str(), binding.as_str())),
+                (None, None) => None,
+                _ => panic!(
+                    "verify takes either no binding args, or both <dn-address> and <binding-file>"
+                ),
+            };
+            verify_cert_file(path, address_check);
         }
         Some("test") | None => run_test(),
         Some(other) => {
@@ -662,7 +798,7 @@ fn main() {
             eprintln!(
                 "  hs-certificates request-rdv  <node-a-addr> <node-a-hash-hex> [expires-unix-ts] [target-node-hash-hex]"
             );
-            eprintln!("  hs-certificates verify       <cert-file>");
+            eprintln!("  hs-certificates verify       <cert-file> [dn-address] [binding-file]");
             eprintln!("  hs-certificates test");
         }
     }
@@ -734,6 +870,87 @@ mod tests {
             build_certificate(sk_b, node_hash, issued_at, expires, challenge, solution).unwrap();
 
         assert!(accept_certificate(&cert, node_hash, challenge, expires));
+    }
+
+    #[test]
+    fn certificate_from_a_dual_keypair_identity_resolves_from_its_address() {
+        // End to end: a certificate built with the pallas half
+        // must be reachable from the Ed25519 half. This
+        // makes a certificate usable, since the client starts from a .dn address
+        // and certificate names a hash.
+        let (_, node_hash, challenge, issued_at, expires) = setup();
+        let solution = solve_challenge(1, challenge);
+        let id = generate_identity();
+        let cert = build_certificate(
+            id.pallas_sk,
+            node_hash,
+            issued_at,
+            expires,
+            challenge,
+            solution,
+        )
+        .unwrap();
+
+        assert_eq!(cert.hs_hash, canonical_hash(&id));
+        let binding = publish_binding(&id);
+        assert!(check_address_binding(&cert, &dn_address(&id), &binding));
+
+        // An unrelated address can't claim this certificate, or
+        // the real address can't be paired with somebody else's binding.
+        let random_identity = generate_identity();
+        assert!(!check_address_binding(
+            &cert,
+            &dn_address(&random_identity),
+            &binding
+        ));
+        assert!(!check_address_binding(
+            &cert,
+            &dn_address(&id),
+            &publish_binding(&random_identity)
+        ));
+    }
+
+    #[test]
+    fn certificate_carries_no_trace_of_the_dn_address() {
+        // The rendezvous node receives this. If the Ed25519
+        // public key (the address) was in it, Node A
+        // could recover the address and censor by name.
+        let (_, node_hash, challenge, issued_at, expires) = setup();
+        let solution = solve_challenge(1, challenge);
+        let id = generate_identity();
+        let cert = build_certificate(
+            id.pallas_sk,
+            node_hash,
+            issued_at,
+            expires,
+            challenge,
+            solution,
+        )
+        .unwrap();
+
+        // serde renders every byte array in the certificate (hashes, signature
+        // scalars, the halo2 proof) as a comma-separated list of decimals
+        // so searching for the raw key bytes or their hex would match
+        // nothing.
+        let rendered = |bytes: &[u8]| {
+            bytes
+                .iter()
+                .map(|b| b.to_string())
+                .collect::<Vec<_>>()
+                .join(",")
+        };
+        let json = String::from_utf8(serde_json::to_vec(&cert).unwrap()).unwrap();
+        let ed_pk = id.ed_sk.verifying_key();
+        assert!(
+            !json.contains(&rendered(ed_pk.as_bytes())),
+            "certificate must not contain the Ed25519 public key"
+        );
+
+        // Check actual appearance
+        assert!(
+            json.contains(&rendered(&cert.hs_hash)),
+            "certificate JSON should render its own hs_hash this way"
+        );
     }
 
     #[test]

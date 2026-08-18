@@ -317,20 +317,24 @@ fn handle_node_a(
     // and hand the endorsement back, so the completed certificate
     // carries public, standalone-verifiable proof that this node agreed
     let end = endorse_certificate(sk_a, &cert);
-    let ok = stream.write_all(&[MSG_ACK]).is_ok()
-        && stream.write_all(&end.rdv_pk).is_ok()
-        && stream.write_all(&end.sig_r).is_ok()
-        && stream.write_all(&end.sig_s).is_ok();
-    if !ok {
-        return;
-    }
+    let (rdv_pk, sig_r, sig_s) = (end.rdv_pk, end.sig_r, end.sig_s);
     cert.endorsement = Some(end);
     let hs = cert.hs_hash;
     if !commit_grant(&table, cert, session) {
         // A later session already granted this hidden service while this one
         // was still proving; its grant stands and this session must not touch
-        // the entry (including in the routing phase below).
+        // the entry (including in the routing phase below). Reject rather than
+        // acknowledge, for the same reason as attach_route's None arm.
         println!("[node-a] {peer}: grant superseded by a newer session, not stored");
+        let _ = stream.write_all(&[MSG_REJECT]);
+        return;
+    }
+
+    let ok = stream.write_all(&[MSG_ACK]).is_ok()
+        && stream.write_all(&rdv_pk).is_ok()
+        && stream.write_all(&sig_r).is_ok()
+        && stream.write_all(&sig_s).is_ok();
+    if !ok {
         return;
     }
 

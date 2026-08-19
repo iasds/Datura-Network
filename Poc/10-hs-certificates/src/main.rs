@@ -152,7 +152,7 @@ enum AttachOutcome {
 // can resubmit it against its current grant.
 //
 // Expired if the window closed while this session was proving.
-// Nothing prevents buying an unusably short grant because the proof takes longer than it's lifetime. 
+// Nothing prevents buying an unusably short grant because the proof takes longer than it's lifetime.
 // An expired grant is reachable for up to REVOCATION_SWEEP_INTERVAL and must not receive a route: the window is over, and the
 // sweeper is about to drop it
 fn attach_route(

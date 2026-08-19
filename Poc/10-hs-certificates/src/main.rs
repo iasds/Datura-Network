@@ -64,6 +64,11 @@ fn required_effort(lifetime_secs: u64) -> u32 {
 // generation mostly), both of which can be over a minute on a single machine.
 const IO_TIMEOUT: Duration = Duration::from_secs(400);
 
+// How often Node A sweeps expired grants out of its routing table. Grants run
+// for days, so the exact period only bounds how long a dead entry lingers;
+// a minute seems to work, should be per node config
+const REVOCATION_SWEEP_INTERVAL: Duration = Duration::from_secs(60);
+
 // Maximum accepted certificate size. A real certificate is a few KB (the
 // halo2 proof dominates); this cap prevents a peer from triggering a ~4 GiB
 // allocation by sending 0xFFFFFFFF as the 4-byte length prefix.
@@ -125,24 +130,62 @@ fn commit_grant(table: &RoutingTable, cert: Certificate, session: u64) -> bool {
     true
 }
 
-// Attaches this session's routing target to its own grant, returning the
-// grant's expiry on success.
+// Why a routing instruction could not be attached. Both reject, but they
+// are different so they stay distinguishable rather than refusing
+#[derive(Debug, PartialEq, Eq)]
+enum AttachOutcome {
+    // Attached; carries the grant's expiry.
+    Attached(u64),
+    // The entry is gone or belongs to a newer session.
+    Superseded,
+    // The grant this instruction belongs to expired before the instruction arrived.
+    Expired,
+}
+
+// Attaches this session's routing target to its own grant.
 //
-// Returns None if the entry is gone or now belongs to a newer session. That
+// Superseded if the entry is gone or now belongs to a newer session. That
 // target was authorized against the certificate this session got endorsed, so
 // writing it onto a certificate from a different session would leave Node A
 // routing a grant that never named its destination. Rejects rather than
 // acknowledging, so Node B learns the instruction did not take and
 // can resubmit it against its current grant.
-fn attach_route(table: &RoutingTable, hs: [u8; 32], target: [u8; 32], session: u64) -> Option<u64> {
+//
+// Expired if the window closed while this session was proving.
+// Nothing prevents buying an unusably short grant because the proof takes longer than it's lifetime. 
+// An expired grant is reachable for up to REVOCATION_SWEEP_INTERVAL and must not receive a route: the window is over, and the
+// sweeper is about to drop it
+fn attach_route(
+    table: &RoutingTable,
+    hs: [u8; 32],
+    target: [u8; 32],
+    session: u64,
+    now: u64,
+) -> AttachOutcome {
     let mut guard = table.lock().unwrap();
     match guard.get_mut(&hs) {
-        Some(entry) if entry.session == session => {
+        Some(entry) if entry.session != session => AttachOutcome::Superseded,
+        Some(entry) if entry.cert.expires <= now => AttachOutcome::Expired,
+        Some(entry) => {
             entry.route_target = Some(target);
-            Some(entry.cert.expires)
+            AttachOutcome::Attached(entry.cert.expires)
         }
-        _ => None,
+        None => AttachOutcome::Superseded,
     }
+}
+
+// Automatic revocation, node side. A certificate authorizes a window that was
+// paid for up front, so the window just closes the grant after. There is no revocation message.
+//
+// Dropping the entry also drops route_target, the field this node is
+// trusted to keep private, so an expired grant leaves no record.
+//
+// Returns how many grants were dropped.
+fn prune_expired(table: &RoutingTable, now: u64) -> usize {
+    let mut guard = table.lock().unwrap();
+    let before = guard.len();
+    guard.retain(|_, entry| entry.cert.expires > now);
+    before - guard.len()
 }
 
 fn read_exact(stream: &mut TcpStream, buf: &mut [u8]) -> bool {
@@ -229,6 +272,20 @@ fn run_node_a_with_identity(port: u16, id_a: IdentityKeys) {
     let sessions = AtomicU64::new(0);
     let listener = TcpListener::bind(format!("0.0.0.0:{port}")).expect("bind failed");
     println!("[node-a:{port}] listening");
+
+    // Revoke expired grants on a timer rather than when entry is affected.
+    {
+        let table = table.clone();
+        thread::spawn(move || {
+            loop {
+                thread::sleep(REVOCATION_SWEEP_INTERVAL);
+                let dropped = prune_expired(&table, now_unix());
+                if dropped > 0 {
+                    println!("[node-a] revoked {dropped} expired grant(s)");
+                }
+            }
+        });
+    }
 
     for incoming in listener.incoming() {
         // A transient accept error (fd exhaustion under a connection flood, a
@@ -355,8 +412,8 @@ fn handle_node_a(
     // The target stays in this node's table only; it is intentionally
     // never logged in full or shared anywhere.
     // The route only lives with the certificate that authorizes it.
-    match attach_route(&table, hs, instr.target_node_hash, session) {
-        Some(expires) => {
+    match attach_route(&table, hs, instr.target_node_hash, session, now_unix()) {
+        AttachOutcome::Attached(expires) => {
             println!(
                 "[node-a] {peer}: routing instruction accepted for hs_hash {} until {expires} (target kept private)",
                 hex::encode(instr.hs_hash),
@@ -365,9 +422,18 @@ fn handle_node_a(
         }
         // Acknowledging here would tell Node B its route is live while the
         // stored grant belongs to another session, so reject and let it retry.
-        None => {
+        AttachOutcome::Superseded => {
             println!(
                 "[node-a] {peer}: routing instruction for hs_hash {} dropped, grant superseded by a newer session",
+                hex::encode(instr.hs_hash),
+            );
+            let _ = stream.write_all(&[MSG_REJECT]);
+        }
+        // The window Node B paid for closed while it was building the proof.
+        // No retry: it has to buy a new grant.
+        AttachOutcome::Expired => {
+            println!(
+                "[node-a] {peer}: routing instruction for hs_hash {} dropped, grant expired",
                 hex::encode(instr.hs_hash),
             );
             let _ = stream.write_all(&[MSG_REJECT]);
@@ -1124,6 +1190,11 @@ mod tests {
     // These exercise commit_grant / attach_route directly: what matters is which session each write belongs
     // to, not the content, which accept_certificate and
     // accept_instruction have already cleared by the time either is called.
+
+    // The session tests are about ordering, so they evaluate
+    // every attach at an instant before dummy_cert's expiries
+    const BEFORE_EXPIRY: u64 = 0;
+
     fn dummy_cert(hs: [u8; 32], expires: u64) -> Certificate {
         Certificate {
             hs_hash: hs,
@@ -1153,7 +1224,10 @@ mod tests {
         assert!(commit_grant(&table, dummy_cert(hs, 2_000), 2));
 
         // Refused, so Node B is told the instruction did not take.
-        assert_eq!(attach_route(&table, hs, [0xAAu8; 32], 1), None);
+        assert_eq!(
+            attach_route(&table, hs, [0xAAu8; 32], 1, BEFORE_EXPIRY),
+            AttachOutcome::Superseded
+        );
 
         let guard = table.lock().unwrap();
         let entry = guard.get(&hs).unwrap();
@@ -1173,7 +1247,10 @@ mod tests {
         let target = [0xBBu8; 32];
 
         assert!(commit_grant(&table, dummy_cert(hs, 1_000), 1));
-        assert_eq!(attach_route(&table, hs, target, 1), Some(1_000));
+        assert_eq!(
+            attach_route(&table, hs, target, 1, BEFORE_EXPIRY),
+            AttachOutcome::Attached(1_000)
+        );
         assert!(commit_grant(&table, dummy_cert(hs, 2_000), 2));
 
         let guard = table.lock().unwrap();
@@ -1191,10 +1268,16 @@ mod tests {
         let target = [0xCCu8; 32];
 
         assert!(commit_grant(&table, dummy_cert(hs, 2_000), 2));
-        assert_eq!(attach_route(&table, hs, target, 2), Some(2_000));
+        assert_eq!(
+            attach_route(&table, hs, target, 2, BEFORE_EXPIRY),
+            AttachOutcome::Attached(2_000)
+        );
 
         assert!(!commit_grant(&table, dummy_cert(hs, 1_000), 1));
-        assert_eq!(attach_route(&table, hs, [0xDDu8; 32], 1), None);
+        assert_eq!(
+            attach_route(&table, hs, [0xDDu8; 32], 1, BEFORE_EXPIRY),
+            AttachOutcome::Superseded
+        );
 
         let guard = table.lock().unwrap();
         let entry = guard.get(&hs).unwrap();
@@ -1212,12 +1295,70 @@ mod tests {
 
         assert!(commit_grant(&table, dummy_cert(hs1, 1_000), 1));
         assert!(commit_grant(&table, dummy_cert(hs2, 1_000), 2));
-        assert_eq!(attach_route(&table, hs1, [0xEEu8; 32], 1), Some(1_000));
-        assert_eq!(attach_route(&table, hs2, [0xFFu8; 32], 2), Some(1_000));
+        assert_eq!(
+            attach_route(&table, hs1, [0xEEu8; 32], 1, BEFORE_EXPIRY),
+            AttachOutcome::Attached(1_000)
+        );
+        assert_eq!(
+            attach_route(&table, hs2, [0xFFu8; 32], 2, BEFORE_EXPIRY),
+            AttachOutcome::Attached(1_000)
+        );
 
         let guard = table.lock().unwrap();
         assert_eq!(guard.get(&hs1).unwrap().route_target, Some([0xEEu8; 32]));
         assert_eq!(guard.get(&hs2).unwrap().route_target, Some([0xFFu8; 32]));
+    }
+
+    #[test]
+    fn sweep_revokes_expired_grants_and_keeps_live_ones() {
+        // Automatic revocation
+        let table: RoutingTable = Arc::new(Mutex::new(HashMap::new()));
+        let (expired, live) = ([6u8; 32], [7u8; 32]);
+
+        assert!(commit_grant(&table, dummy_cert(expired, 1_000), 1));
+        assert!(commit_grant(&table, dummy_cert(live, 3_000), 2));
+        assert_eq!(
+            attach_route(&table, expired, [0x11u8; 32], 1, BEFORE_EXPIRY),
+            AttachOutcome::Attached(1_000)
+        );
+
+        assert_eq!(prune_expired(&table, 2_000), 1);
+
+        let guard = table.lock().unwrap();
+        // The route target goes with the grant. An expired grant can't leave a record of where its traffic was going
+        assert!(guard.get(&expired).is_none());
+        assert_eq!(guard.get(&live).unwrap().cert.expires, 3_000);
+    }
+
+    #[test]
+    fn sweep_at_the_expiry_second_revokes() {
+        // expires is the first second the grant is no longer valid, matching
+        // accept_certificate and verify_cert_file with expires <= now as expired
+        let table: RoutingTable = Arc::new(Mutex::new(HashMap::new()));
+        let hs = [8u8; 32];
+
+        assert!(commit_grant(&table, dummy_cert(hs, 1_000), 1));
+        assert_eq!(prune_expired(&table, 999), 0, "still inside the window");
+        assert_eq!(prune_expired(&table, 1_000), 1);
+    }
+
+    #[test]
+    fn expired_grant_takes_no_route() {
+        // Node B can buy a grant lasting seconds, and building the routing
+        // instruction's proof takes longer than that, so the instruction can
+        // arrive after its own grant expired, before any sweep has run. It gets
+        // rejected.
+        let table: RoutingTable = Arc::new(Mutex::new(HashMap::new()));
+        let hs = [9u8; 32];
+
+        assert!(commit_grant(&table, dummy_cert(hs, 1_000), 1));
+        assert_eq!(
+            attach_route(&table, hs, [0x22u8; 32], 1, 1_500),
+            AttachOutcome::Expired
+        );
+
+        let guard = table.lock().unwrap();
+        assert_eq!(guard.get(&hs).unwrap().route_target, None);
     }
 
     #[test]

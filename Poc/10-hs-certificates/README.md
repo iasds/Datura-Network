@@ -22,7 +22,7 @@ Connects to Node A declaring the desired `expires` (so the challenge is priced f
 ```
 ./target/release/hs-certificates verify <cert-file> [dn-address] [binding-file]
 ```
-Loads a certificate from a JSON file and independently re-checks everything a third party can check from the certificate alone: the ZK proof, the Equi-X PoW solution against the embedded challenge (proof of payment), current-time expiry (automatic revocation), and the RDV node's endorsement signature. No connection to Node A, no knowledge of the original handshake required. This is the property PoC 10.1 (#117) needs: the proof must stay attached and stay checkable by anyone, not be verified once and discarded.
+Loads a certificate from a JSON file and independently re-checks everything a third party can check from the certificate alone: the ZK proof, the Equi-X PoW solution against the embedded challenge (proof of payment), current-time expiry (see [Automatic revocation](#automatic-revocation)), and the RDV node's endorsement signature. No connection to Node A, no knowledge of the original handshake required. This is the property PoC 10.1 (#117) needs: the proof must stay attached and stay checkable by anyone, not be verified once and discarded.
 
 Supplying a `.dn` address and its address binding adds a check the third party can't make: that the certificate belongs to that hidden service. Both arguments are required.
 
@@ -176,6 +176,14 @@ Reused from what I did for PoC 11 (which reused it from PoC 4.5 / 4.9), with one
 The challenge difficulty now scales with the grant being bought: Node B declares its desired `expires` inside the RDV request, and Node A prices the challenge at `MIN_CHALLENGE_DIFFICULTY` (800) per started day of requested lifetime (`required_effort`), so a 30-day grant costs 30× the work of a 1-day grant. `accept_certificate` then requires `cert.expires` to equal exactly the expiry that was priced: a certificate claiming any other lifetime wasn't what was paid for. Difficulty 800 solves in tens of milliseconds on a single thread; 24000 (30 days) in the low seconds.
 
 The 30-day cap (`MAX_CERT_LIFETIME_SECS`) stays even with pricing: Equi-X solve time scales linearly, so a years-long grant would need one absurd challenge, and renewal-by-expiry is the intended mechanism anyway.
+
+#### Automatic revocation
+
+A grant is authorization for a window that was paid for up front, so it ends by expiring. Nothing is signed to revoke, nothing says it ended, and no party has to be reachable.
+
+**Any verifier, from the certificate alone.** `verify_cert_file` treats `expires <= now` as expired and reports `certificate: INVALID` regardless of how well everything else checks out.
+
+**On the RDV node, on a timer.** `prune_expired` drops every entry whose window has closed, run by a sweeper thread every `REVOCATION_SWEEP_INTERVAL`. (set at 1 minute here) The target is the field this node is trusted to keep private, and it doesn't outlive the grant that authorized it. `attach_route` also refuses to install a target on an already-expired grant, which is reachable between sweeps. Nothing stops Node B buying a grant lasting seconds, and building the routing instruction's proof takes longer than that. A `MIN_CERT_LIFETIME` could be added network-wide in addition to `MAX_CERT_LIFETIME_SECS`.
 
 # Design notes / tradeoffs
 

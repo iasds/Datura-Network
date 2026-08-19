@@ -307,6 +307,8 @@ statelessly. With no contact with A or B, and no session context. That stateless
 is what PoC 10.1 and 11.1 build on. (The routing instruction is *not* part of this: it
 stays private between B and A by design.)
 
+**7a. Expire.** Nothing ends the grant; it runs out. Verifiers read `expires` off the certificate it holds and calls it invalid past that point. No revocation message to distribute and nothing to fetch before trusting one. Expired entries are cleared out on a timer (`prune_expired`), which also discards the private routing target.
+
 **8. Resolve, if you know the address.** A client that was given B's `.dn` address does one
 more step A can't: `resolve_hs_hash(address, binding)` produces `H` from the address, and
 matching it against the certificate's `hs_hash` shows that this certificate is the

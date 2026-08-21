@@ -12,3 +12,7 @@
 **/*TTrace*
 
 .*
+!.cargo-husky/
+!.cargo-husky/**
+!.forgejo/
+!.forgejo/**

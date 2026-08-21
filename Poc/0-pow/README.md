@@ -1,6 +1,6 @@
 # Building
 ```
-doctor@dev:~$ rustc -O main.rs
+cargo build --release
 ```
 
 # Notes
@@ -16,12 +16,12 @@ doctor@dev:~$ rustc -O main.rs
 # Input
 ## Creating a source node
 ```
-doctor@dev:~$ ./main 8000
+./main 8000
 ```
 
 ## Creating a bootstrap node
 ```
-doctor@dev:~$ ./main 8010 127.0.0.1:8000
+./main 8010 127.0.0.1:8000
 ```
 
 # Output

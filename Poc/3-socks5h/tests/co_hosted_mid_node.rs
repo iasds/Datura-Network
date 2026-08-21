@@ -4,22 +4,24 @@
 //! This test drives the real `socks5` binary as subprocesses (there is no
 //! `[lib]` target in this crate, so the roles in `src/main.rs` are only
 //! reachable through the compiled binary, not by calling functions
-//! directly) and exercises the exact scenario described in the approved
-//! architecture change:
+//! directly) and exercises the current, envelope-free, genuine-SOCKS5
+//! architecture:
 //!
 //! 1. `local_node_a` runs with both `--port` (its own entry point) and
 //!    `--mid-port` (a co-hosted `mid_node` relay sharing the same
 //!    `--next-hop`), forwarding toward a shared `exit_node`.
 //! 2. Raw UDP, raw TCP, and a genuine SOCKS5 client request are each sent
-//!    directly to `local_node_a`'s entry port.
-//! 3. An envelope-wrapped SOCKS5 CONNECT-to-sentinel request (replicating
-//!    the exact wire format `helpers::tunnel_envelope` produces) is sent
-//!    directly to `local_node_a`'s co-hosted mid-port, exercising the
-//!    envelope-reconstruction path through the relay listener.
-//! 4. A second, independent `local_node_b` is started with its
-//!    `--next-hop` pointed at `local_node_a`'s mid-port, and a UDP request
-//!    sent into `local_node_b`'s own entry port is traced all the way
-//!    through `local_node_a`'s co-hosted relay to `exit_node`.
+//!    directly to `local_node_a`'s entry port, exercising the genuine SOCKS5
+//!    UDP ASSOCIATE capture path, the genuine SOCKS5 CONNECT capture path,
+//!    and the SOCKS5-in-SOCKS5 passthrough (Case Y) path respectively.
+//! 3. A second, independent `local_node_b` is started with its `--next-hop`
+//!    pointed at `local_node_a`'s co-hosted mid-port (not at `exit_node`
+//!    directly), and a raw TCP request sent into `local_node_b`'s own entry
+//!    port is traced all the way through `local_node_a`'s relay to
+//!    `exit_node` as a genuine SOCKS5 CONNECT capture. UDP is not exercised
+//!    through the mid-port chain here: `mid_node` deliberately never enables
+//!    UDP ASSOCIATE support (an explicit, out-of-scope limitation), so only
+//!    the TCP/CONNECT case is meaningful to test through it.
 //!
 //! `exit_node`'s captured stdout is asserted against for each step using
 //! distinct, greppable payload contents so each assertion can only match
@@ -228,41 +230,6 @@ fn perform_socks5_connect(stream: &mut TcpStream, target_host: [u8; 4], target_p
         .expect("failed to read SOCKS5 CONNECT bound address/port");
 }
 
-/// Replicates `helpers::tunnel_envelope`'s exact wire format: a SOCKS5
-/// CONNECT to the reserved sentinel `0.0.0.0:0`, followed by the tagged
-/// envelope (version byte, transport tag byte, big-endian u32 payload
-/// length, raw payload bytes). Used to send an envelope-wrapped request
-/// directly at a mid-port (Case X), since a bare TCP client hitting a
-/// mid_node listener must speak SOCKS5 to be relayed at all.
-fn send_envelope_wrapped_request(
-    target_address: &str,
-    transport_tag: u8,
-    payload: &[u8],
-) -> TcpStream {
-    let mut stream = TcpStream::connect(target_address).unwrap_or_else(|connect_error| {
-        panic!("failed to connect to {target_address}: {connect_error}")
-    });
-
-    perform_socks5_connect(&mut stream, [0, 0, 0, 0], 0);
-
-    stream
-        .write_all(&[0x01]) // ENVELOPE_VERSION
-        .expect("failed to write envelope version byte");
-    stream
-        .write_all(&[transport_tag])
-        .expect("failed to write envelope transport tag byte");
-    stream
-        .write_all(&(payload.len() as u32).to_be_bytes())
-        .expect("failed to write envelope payload length");
-    stream
-        .write_all(payload)
-        .expect("failed to write envelope payload");
-
-    stream
-}
-
-const TRANSPORT_TCP: u8 = 0x01;
-
 /// Exercises the full co-hosted `local_node` + `mid_node` scenario end to
 /// end against a real `exit_node`, including a second, independent
 /// `local_node` chained through the first node's co-hosted mid-port.
@@ -372,14 +339,14 @@ fn demonstrates_local_node_co_hosting_mid_node_relay() {
     {
         let mut socks5_stream = TcpStream::connect(&local_node_a_entry_address)
             .expect("failed to connect SOCKS5 client to local_node_a entry port");
-        // Arbitrary real-looking target distinct from the sentinel so this
-        // is unambiguously Case Y passthrough, not Case X envelope mode.
-        perform_socks5_connect(&mut socks5_stream, [93, 184, 216, 34], 80);
+        // Loopback target distinct from the capture placeholder so this is
+        // unambiguously Case Y passthrough, not a Case X capture.
+        perform_socks5_connect(&mut socks5_stream, [127, 0, 0, 1], 80);
         let _ = socks5_stream.shutdown(std::net::Shutdown::Both);
     }
     let socks5_passthrough_line = wait_for_line_containing(
         &exit_node_captured_lines,
-        "SOCKS5 passthrough -> 93.184.216.34:80",
+        "SOCKS5 passthrough -> 127.0.0.1:80",
         Duration::from_secs(5),
     );
     assert!(
@@ -387,35 +354,15 @@ fn demonstrates_local_node_co_hosting_mid_node_relay() {
         "expected a Case Y passthrough line for the P1 SOCKS5 request, got: {socks5_passthrough_line}"
     );
 
-    // --- step 6: envelope-wrapped SOCKS5 CONNECT-to-sentinel directly to
-    // local_node_a's co-hosted mid-port (P2), exercising the
-    // envelope-reconstruction path (Case X) through the mid-port.
-    // Transport tag choice: TCP (TRANSPORT_TCP), arbitrarily, since either
-    // tag exercises the same code path in exit_node symmetrically. ---
-    let midport_direct_payload = b"midport-direct-test-P2";
-    {
-        let envelope_stream = send_envelope_wrapped_request(
-            &local_node_a_mid_address,
-            TRANSPORT_TCP,
-            midport_direct_payload,
-        );
-        let _ = envelope_stream.shutdown(std::net::Shutdown::Both);
-    }
-    let midport_direct_line = wait_for_line_containing(
-        &exit_node_captured_lines,
-        "midport-direct-test-P2",
-        Duration::from_secs(5),
-    );
-    assert!(
-        midport_direct_line.starts_with("TCP reconstructed"),
-        "expected a 'TCP reconstructed' line for the P2 mid-port envelope request, got: {midport_direct_line}"
-    );
-
-    // --- step 7: start local_node_b, an independent second local_node
+    // --- step 6: start local_node_b, an independent second local_node
     // whose --next-hop points at local_node_a's co-hosted mid-port (P2),
-    // not at exit_node directly. Send a UDP request into local_node_b's
-    // own entry port (P3) and confirm it reaches exit_node through
-    // local_node_a's relay. ---
+    // not at exit_node directly. Send a raw TCP request into local_node_b's
+    // own entry port (P3) -- this travels as a genuine SOCKS5 CONNECT
+    // capture targeting the CAPTURE_TARGET_HOST/PORT placeholder -- and
+    // confirm it reaches exit_node through local_node_a's relay (mid_node
+    // is TCP/CONNECT-only, so only the TCP case is exercised through it;
+    // UDP ASSOCIATE through a mid_node hop is an explicit, out-of-scope
+    // limitation and is not tested here). ---
     let local_node_b_entry_port_argument = local_node_b_entry_port.to_string();
     let mut local_node_b_guard = ChildProcessGuard::spawn(
         "local_node_b",
@@ -437,10 +384,12 @@ fn demonstrates_local_node_co_hosting_mid_node_relay() {
 
     let node_b_payload = b"nodeB-via-midport-test";
     {
-        let udp_socket = UdpSocket::bind("127.0.0.1:0").expect("failed to bind test UDP socket");
-        udp_socket
-            .send_to(node_b_payload, &local_node_b_entry_address)
-            .expect("failed to send UDP datagram to local_node_b entry port");
+        let mut tcp_stream = TcpStream::connect(&local_node_b_entry_address)
+            .expect("failed to connect raw TCP to local_node_b entry port");
+        tcp_stream
+            .write_all(node_b_payload)
+            .expect("failed to write raw TCP payload to local_node_b entry port");
+        let _ = tcp_stream.shutdown(std::net::Shutdown::Write);
     }
     let node_b_line = wait_for_line_containing(
         &exit_node_captured_lines,
@@ -448,19 +397,18 @@ fn demonstrates_local_node_co_hosting_mid_node_relay() {
         Duration::from_secs(5),
     );
     assert!(
-        node_b_line.starts_with("UDP reconstructed"),
-        "expected a 'UDP reconstructed' line for the local_node_b -> local_node_a(mid-port) -> exit_node chain, got: {node_b_line}"
+        node_b_line.starts_with("TCP reconstructed"),
+        "expected a 'TCP reconstructed' line for the local_node_b -> local_node_a(mid-port) -> exit_node chain, got: {node_b_line}"
     );
 
     // Explicit evidence dump for the report; process cleanup happens via
     // ChildProcessGuard's Drop impl for exit_node_guard, local_node_a_guard,
     // and local_node_b_guard regardless of how this test exits.
     eprintln!("--- captured exit_node stdout evidence ---");
-    eprintln!("step 3 (UDP -> P1):        {udp_p1_line}");
-    eprintln!("step 4 (TCP -> P1):        {tcp_p1_line}");
-    eprintln!("step 5 (SOCKS5 -> P1):     {socks5_passthrough_line}");
-    eprintln!("step 6 (envelope -> P2):   {midport_direct_line}");
-    eprintln!("step 7 (nodeB -> P2 -> exit): {node_b_line}");
+    eprintln!("step 3 (UDP -> P1):           {udp_p1_line}");
+    eprintln!("step 4 (TCP -> P1):           {tcp_p1_line}");
+    eprintln!("step 5 (SOCKS5 -> P1):        {socks5_passthrough_line}");
+    eprintln!("step 6 (nodeB -> P2 -> exit): {node_b_line}");
 
     drop(local_node_b_guard);
     drop(local_node_a_guard);

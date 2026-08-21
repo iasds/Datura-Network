@@ -8,7 +8,7 @@ type NodeList = Arc<Mutex<Vec<String>>>;
 // fn get_public_ip() -> io::Result<String> {
 //     let mut stream = TcpStream::connect("api.ipify.org:80")?;
 //     let mut response = String::new();
-    
+
 //     stream.write_all(b"GET / HTTP/1.0\r\nHost: api.ipify.org\r\n\r\n")?;
 //     stream.read_to_string(&mut response)?;
 
@@ -27,7 +27,9 @@ fn handle_incoming(mut stream: TcpStream, nodes: NodeList) -> io::Result<()> {
     let bytes_read = stream.read(&mut port_buffer)?;
 
     let connecting_node_ip = stream.peer_addr()?.ip().to_string();
-    let connecting_node_port = String::from_utf8_lossy(&port_buffer[..bytes_read]).trim().to_string();
+    let connecting_node_port = String::from_utf8_lossy(&port_buffer[..bytes_read])
+        .trim()
+        .to_string();
 
     let connecting_node_addr = format!("{}:{}", connecting_node_ip, connecting_node_port);
 
@@ -57,7 +59,7 @@ fn connect(bootstrap_addr: &str, my_port: &str, nodes: NodeList) -> io::Result<(
     stream.read_to_string(&mut response)?;
 
     let mut nodes = nodes.lock().unwrap();
-    
+
     for line in response.lines() {
         let addr = line.trim().to_string();
 
@@ -86,7 +88,7 @@ fn listen(port: &str, nodes: NodeList) -> io::Result<()> {
 fn main() -> io::Result<()> {
     let args: Vec<String> = env::args().collect();
     let nodes: NodeList = Arc::new(Mutex::new(Vec::new()));
-    
+
     if args.len() < 2 {
         eprintln!("Usage: {} <port> [bootstrap_addr]", args[0]);
         std::process::exit(1);
@@ -94,7 +96,7 @@ fn main() -> io::Result<()> {
 
     // let my_ip = get_public_ip()?;
     // let my_addr = format!("{}:{}", my_ip, &args[1]);
-    
+
     // nodes.lock().unwrap().push(my_addr);
 
     match args.len() {

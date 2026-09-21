@@ -49,9 +49,10 @@ Step 6, the unrelated hidden service is not refused; it buys its own grant, whic
 
 ### Implementation
 
-New code is `announce.rs` and `main.rs`. The other eight modules (`circuit.rs`, `dlog.rs`,
-`schnorr.rs`, `certificate.rs`, `routing.rs`, `identity.rs`, `address.rs`, `equix_pow.rs`) are
-copies of PoC 10's.
+New code is `announce.rs` and `main.rs`. `routing.rs` is PoC 10's plus the binding work, and
+`circuit.rs` is PoC 10's plus one off-circuit helper (`route_binding`). The other six modules
+(`dlog.rs`, `schnorr.rs`, `certificate.rs`, `identity.rs`, `address.rs`, `equix_pow.rs`) are copies of
+PoC 10's. `CertificateCircuit` itself is untouched, so the proving key is still PoC 10's.
 
 **PoC 10's gap** Its routing instruction names a target **node hash**; PoC 11's forwarder
 needs a **`SocketAddr`**. Nothing resolves one to the other yet: PoC 8.1's DHT is
@@ -78,8 +79,11 @@ No ZK proof needed. A node's identity hash `Poseidon(pk)` is public, so the anno
   observed an announcement could resend it from their own IP and rebind that hash to themselves.
 
 The digest is `Poseidon(node_hash, port, challenge, ANNOUNCE_DOMAIN)`. Its 4-ary arity
-separates it from every other Poseidon use in this lineage (2-ary `hs_hash`, 3-ary
-`envelope_message`, 5-ary `endorsement_digest`); `ANNOUNCE_DOMAIN` mirrors `ROUTE_DOMAIN`. Re-announcing is how a node moves address, only the key holder can do it.
+separates it from every other Poseidon use in this lineage (2-ary `hs_hash`, 5-ary
+`endorsement_digest`); `ANNOUNCE_DOMAIN` mirrors `ROUTE_DOMAIN`. Re-announcing is how a node moves
+address, only the key holder can do it.
+
+`route_binding` is now 3-ary, same as `envelope_message`. `envelope_message` produces the *signed message*, which never enters an instance vector, and `route_binding`'s output is truncated into `[2^192, 2^193)` before it becomes slot 3. The certificate/instruction separation is on that range (slot 3 is a `u128` for a certificate), not on arity.
 
 **Register flow.**
 ```
@@ -96,9 +100,12 @@ carries a challenge Node A issued in this same session, priced by the requested 
 The announce path keeps its own PoW because it carries no certificate, making it the only unpaid
 write to Node A's state.
 
+The instruction JSON carries a 16-byte `client_nonce` alongside the three hashes and the proof; Node A
+needs it to rebuild slot 3.
+
 `accept_certificate` runs cheap checks (hash match, expiry, `issued_at` skew, PoW) before the ZK
 proof, and `accept_instruction` resolves the target through the node list before verifying its proof.
-The instruction's target goes into `RdvEntry.target_addr` and nowhere else.
+The nonce is claimed last, after the proof verifies, so a garbage submission cannot burn a nonce. The instruction's target goes into `RdvEntry.target_addr`.
 
 **Packet flow.** Node A forwards only if the entry has a live grant *and* an attached route. A grant
 whose registrant closed the session before sending an instruction routes nothing.
@@ -111,7 +118,8 @@ up front, so it ends by expiring. Nothing is signed to revoke and no party has t
 no record of where it pointed.
 
 **Resource limits.** `MAX_RULES` 1024 granted entries, `MAX_NODES` 1024 distinct nodes in the map,
-`MAX_CONNECTIONS` 256 live handler threads, `MAX_CERT_LEN` 1 MiB, `IO_TIMEOUT` 30 s. The register
+`MAX_SEEN_NONCES` 65,536 admitted client nonces, `MAX_CONNECTIONS` 256 live handler threads,
+`MAX_CERT_LEN` 1 MiB, `IO_TIMEOUT` 30 s. The register
 path is promoted to `REGISTER_IO_TIMEOUT` 400 s only once a peer identifies itself as a
 registration, so a peer that connects and sends nothing holds a thread for 30 seconds rather than 400.
 
@@ -124,6 +132,31 @@ registration, so a peer that connects and sends nothing holds a thread for 30 se
   forwarded packet arrives addressed to the target node's own hash and the next hop treats it as
   terminal. Restoring chaining needs a fifth instance slot in PoC 10's circuit and a new proving
   key, a PoC 10 change. **Feedback wanted on whether chaining is required.**
+- **A routing instruction is bound to its grant** An instruction commits
+  to `[hs_hash, rdv_hash, target_hash, slot3]`, and slot 3 had a constant domain separator. But, two instructions for the same route were identical to the verifier, so an old one could be replayed against a later grant. Because the instruction is not encrypted and `accept_instruction` authenticates the hash
+  rather than the sender, anyone who observed one could replay it and re-pin a hs to a target, inside a window that hs paid for. Slot 3 now
+  holds `route_binding(pow_challenge, client_nonce) = Poseidon(route_domain, challenge, nonce)`,
+  truncated so the value stays in `[2^192, 2^193)`. The challenge is fresh per connection and already
+  checked for freshness when the certificate is accepted, so each instruction is usable only in its
+  own ceremony; keeping the value above `2^192` keeps  structural separation from
+  certificates, whose slot 3 is a `u128`. No circuit or proving-key change was needed, so instance arity is still four.
+- **The nonce stops a malicious RDV node, not the challenge.** Node A picks the challenge and
+  keeps no record of ones it issued, so it can reissue a previous challenge instead of
+  calling `create_challenge`. Node B solves what it is sent, so under a challenge-only binding
+  the old instruction's slot-3 value was rebuilt and the stale target re-pinned for the newly paid
+  window. The instruction was bound to *a* challenge, not *fresh*, and the adversary chose
+  the value being bound, so no binding over Node A's inputs could close this.
+  `client_nonce` is Node B's own 16 bytes, generated per connection by `new_client_nonce` and mixed
+  into slot 3 alongside the challenge. Freshness comes from *generating* a value, not recognizing an old one, so it needs no state on Node B and survives restart. 
+  The nonce is not a secret: its needs to be
+  unpredictable to Node A before the instruction exists, and to be a value Node A must present
+  after. Node A rejects a nonce it has already admitted (`claim_nonce`), which is the check the
+  *enforcing* party can make: a client-side freshness check would be unverifiable at the
+  node and would have to persist across restarts to catch a replay from an earlier grant at all.
+  Tampering with the nonce breaks the proof.`a_reissued_challenge_does_not_admit_the_old_instruction` covers the attack end to end.
+- **The seen-nonce set is bounded, and wraps** `MAX_SEEN_NONCES` 65,536 entries, cleared at the limit, so a node won't run out of memory. Wrapping loses replay detection for what was cleared. A real node would key the set per
+  grant and drop it with the grant, which bounds it by `MAX_RULES` instead and needs no wrap; that is
+  a change to `RdvEntry`, left out here.
 - **First-come-wins replaced by proven ownership.** PoC 11 refused re-registration because
   it could not distinguish renewals from hijacks. A renewal now succeeds and inherits the existing
   route, while a older session cannot displace a grant committed after it.

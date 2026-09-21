@@ -201,6 +201,23 @@ pub fn envelope_message(
         .hash([rdv_node_hash, expires, pow_challenge])
 }
 
+// Poseidon(domain, pow_challenge, client_nonce), used by routing.rs to build
+// slot 3 of an instruction's instance
+//
+// The nonce is Node B's per-connection entropy
+//
+// The caller is responsible for keeping the result outside the u128 range that
+// certificates occupy; a raw Poseidon output is uniform over the
+// field and would only separate the two proof types probabilistically
+pub fn route_binding(
+    domain: pallas::Base,
+    pow_challenge: pallas::Base,
+    client_nonce: pallas::Base,
+) -> pallas::Base {
+    halo2_gadgets::poseidon::primitives::Hash::<_, P128Pow5T3, ConstantLength<3>, WIDTH, RATE>::init()
+        .hash([domain, pow_challenge, client_nonce])
+}
+
 // Off-circuit reference computation of H = Poseidon(pk.x, pk.y).
 pub fn hs_hash(pk: pallas::Affine) -> pallas::Base {
     use halo2_proofs::arithmetic::CurveAffine;

@@ -16,7 +16,7 @@ mod identity;
 mod routing;
 mod schnorr;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::io::{Read, Write};
 use std::net::{IpAddr, SocketAddr, TcpListener, TcpStream};
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
@@ -37,7 +37,10 @@ use circuit::hs_hash;
 use dlog::derive_pk;
 use equix_pow::{create_challenge, get_challenge_effort, solve_challenge, verify_solution};
 use identity::{IdentityKeys, canonical_hash, dn_address, generate_identity};
-use routing::{RoutingInstruction, build_routing_instruction, verify_routing_instruction};
+use routing::{
+    CLIENT_NONCE_LEN, RoutingInstruction, build_routing_instruction, new_client_nonce,
+    verify_routing_instruction,
+};
 
 // Wire format version, first byte of every message on every flow
 const PROTO_VERSION: u8 = 1;
@@ -94,6 +97,30 @@ struct RdvEntry {
 }
 
 type RoutingTable = Arc<Mutex<HashMap<[u8; 32], RdvEntry>>>;
+
+// Client nonces Node A has admitted, so a nonce cannot be reused
+//
+// The instruction's proof binds the nonce, so an attacker replaying an old
+// instruction has to replay its nonce too; this is where that becomes visible.
+// Checked at the node because Node A is the party that enforces routing
+// acceptance: a freshness check on Node B's side would be unverifiable here,
+// and would have to persist across restarts to catch a replay from an earlier
+// grant at all.
+//
+// Bounded by MAX_SEEN_NONCES. On overflow the set is cleared
+type SeenNonces = Arc<Mutex<HashSet<[u8; CLIENT_NONCE_LEN]>>>;
+
+// Distinct client nonces held before the set wraps
+const MAX_SEEN_NONCES: usize = 65_536;
+
+// Records a nonce, returns false if its already present
+fn claim_nonce(seen: &SeenNonces, nonce: [u8; CLIENT_NONCE_LEN]) -> bool {
+    let mut guard = seen.lock().unwrap();
+    if guard.len() >= MAX_SEEN_NONCES && !guard.contains(&nonce) {
+        guard.clear();
+    }
+    guard.insert(nonce)
+}
 
 // Node hash -> the address that node announced itself from
 type NodeList = Arc<Mutex<HashMap<[u8; 32], SocketAddr>>>;
@@ -343,6 +370,8 @@ fn run_node_a_with_identity(port: u16, id_a: IdentityKeys) {
 
     let table: RoutingTable = Arc::new(Mutex::new(HashMap::new()));
     let node_list: NodeList = Arc::new(Mutex::new(HashMap::new()));
+    // Node-wide, not per-connection: a replay arrives on a later connection
+    let seen_nonces: SeenNonces = Arc::new(Mutex::new(HashSet::new()));
 
     // Revoke expired grants on a timer
     {
@@ -364,9 +393,16 @@ fn run_node_a_with_identity(port: u16, id_a: IdentityKeys) {
         };
         match ty {
             MSG_ANNOUNCE => handle_announce(stream, peer, &node_list, port),
-            MSG_REQUEST_RDV => {
-                handle_register(stream, peer, sk_a, node_hash, &table, &node_list, session)
-            }
+            MSG_REQUEST_RDV => handle_register(
+                stream,
+                peer,
+                sk_a,
+                node_hash,
+                &table,
+                &node_list,
+                &seen_nonces,
+                session,
+            ),
             MSG_PACKET => handle_packet(stream, peer, &table),
             other => println!("[node-a] {peer}: unknown message type {other}"),
         }
@@ -442,6 +478,7 @@ fn handle_register(
     node_hash: [u8; 32],
     table: &RoutingTable,
     node_list: &NodeList,
+    seen_nonces: &SeenNonces,
     session: u64,
 ) {
     // promote the connection
@@ -511,7 +548,10 @@ fn handle_register(
         return;
     };
 
-    let Some(addr) = accept_instruction(&instr, hs, node_hash, node_list) else {
+    // `challenge` is this connection's, so an instruction proved under an earlier grant's challenge is rejected.
+    // The nonce check covers the case this node reissued a challenge, whether by fault or on purpose
+    let Some(addr) = accept_instruction(&instr, hs, node_hash, node_list, seen_nonces, challenge)
+    else {
         println!("[node-a] {peer}: routing instruction rejected");
         reject(stream);
         return;
@@ -576,11 +616,14 @@ fn accept_certificate(
 // - must name this node
 // - must be for hs_hash endorsed this session
 // - target must be a known node
+// - client nonce must be one this node has not admitted before
 fn accept_instruction(
     instr: &RoutingInstruction,
     granted_hs_hash: [u8; 32],
     node_hash: [u8; 32],
     node_list: &NodeList,
+    seen_nonces: &SeenNonces,
+    pow_challenge: u128,
 ) -> Option<SocketAddr> {
     if instr.rdv_node_hash != node_hash || instr.hs_hash != granted_hs_hash {
         return None;
@@ -590,7 +633,12 @@ fn accept_instruction(
         .unwrap()
         .get(&instr.target_node_hash)
         .copied()?;
-    if !verify_routing_instruction(instr) {
+    if !verify_routing_instruction(instr, pow_challenge) {
+        return None;
+    }
+    // the nonce is once the instruction is known good, so a
+    // garbage submission cannot burn a nonce
+    if !claim_nonce(seen_nonces, instr.client_nonce) {
         return None;
     }
     Some(addr)
@@ -849,8 +897,18 @@ fn do_register(
                 "[register] sending private routing instruction (target: {}...)",
                 &hex::encode(target_hash)[..16]
             );
-            let instr = build_routing_instruction(sk_b, node_a_hash, target_hash)
-                .expect("hashes validated canonical");
+            // Bound to the same challenge the certificate paid with, plus a
+            // nonce. The challenge is Node A's to choose,
+            // so the nonce makes this instruction unusable for any
+            // other grant even if Node A reissues the challenge
+            let instr = build_routing_instruction(
+                sk_b,
+                node_a_hash,
+                target_hash,
+                challenge,
+                new_client_nonce(),
+            )
+            .expect("hashes validated canonical");
             if !write_json_frame(&mut stream, MSG_ROUTE, &instr) {
                 return None;
             }
@@ -1040,6 +1098,11 @@ mod tests {
         SocketAddr::new(IpAddr::V4(std::net::Ipv4Addr::LOCALHOST), port)
     }
 
+    // An empty seen-nonce set, for tests not on replay
+    fn no_nonces() -> SeenNonces {
+        Arc::new(Mutex::new(HashSet::new()))
+    }
+
     // required_effort / pricing
 
     #[test]
@@ -1110,9 +1173,21 @@ mod tests {
         let node_hash = identity_hash(&id_a);
         let id_b = generate_identity();
         let target = identity_hash(&generate_identity());
-        let instr = build_routing_instruction(id_b.pallas_sk, node_hash, target).unwrap();
+        let instr =
+            build_routing_instruction(id_b.pallas_sk, node_hash, target, 42, new_client_nonce())
+                .unwrap();
         let node_list: NodeList = Arc::new(Mutex::new(HashMap::new()));
-        assert!(accept_instruction(&instr, instr.hs_hash, node_hash, &node_list).is_none());
+        assert!(
+            accept_instruction(
+                &instr,
+                instr.hs_hash,
+                node_hash,
+                &node_list,
+                &no_nonces(),
+                42
+            )
+            .is_none()
+        );
     }
 
     #[test]
@@ -1121,11 +1196,20 @@ mod tests {
         let node_hash = identity_hash(&id_a);
         let id_b = generate_identity();
         let target = identity_hash(&generate_identity());
-        let instr = build_routing_instruction(id_b.pallas_sk, node_hash, target).unwrap();
+        let instr =
+            build_routing_instruction(id_b.pallas_sk, node_hash, target, 42, new_client_nonce())
+                .unwrap();
         let node_list: NodeList = Arc::new(Mutex::new(HashMap::new()));
         node_list.lock().unwrap().insert(target, addr(9131));
         assert_eq!(
-            accept_instruction(&instr, instr.hs_hash, node_hash, &node_list),
+            accept_instruction(
+                &instr,
+                instr.hs_hash,
+                node_hash,
+                &node_list,
+                &no_nonces(),
+                42
+            ),
             Some(addr(9131))
         );
     }
@@ -1137,10 +1221,22 @@ mod tests {
         let elsewhere = identity_hash(&generate_identity());
         let id_b = generate_identity();
         let target = identity_hash(&generate_identity());
-        let instr = build_routing_instruction(id_b.pallas_sk, elsewhere, target).unwrap();
+        let instr =
+            build_routing_instruction(id_b.pallas_sk, elsewhere, target, 42, new_client_nonce())
+                .unwrap();
         let node_list: NodeList = Arc::new(Mutex::new(HashMap::new()));
         node_list.lock().unwrap().insert(target, addr(9131));
-        assert!(accept_instruction(&instr, instr.hs_hash, node_hash, &node_list).is_none());
+        assert!(
+            accept_instruction(
+                &instr,
+                instr.hs_hash,
+                node_hash,
+                &node_list,
+                &no_nonces(),
+                42
+            )
+            .is_none()
+        );
     }
 
     #[test]
@@ -1150,11 +1246,317 @@ mod tests {
         let node_hash = identity_hash(&id_a);
         let id_b = generate_identity();
         let target = identity_hash(&generate_identity());
-        let instr = build_routing_instruction(id_b.pallas_sk, node_hash, target).unwrap();
+        let instr =
+            build_routing_instruction(id_b.pallas_sk, node_hash, target, 42, new_client_nonce())
+                .unwrap();
         let node_list: NodeList = Arc::new(Mutex::new(HashMap::new()));
         node_list.lock().unwrap().insert(target, addr(9131));
         let someone_else = identity_hash(&generate_identity());
-        assert!(accept_instruction(&instr, someone_else, node_hash, &node_list).is_none());
+        assert!(
+            accept_instruction(
+                &instr,
+                someone_else,
+                node_hash,
+                &node_list,
+                &no_nonces(),
+                42
+            )
+            .is_none()
+        );
+    }
+
+    #[test]
+    fn instruction_from_an_old_grant_is_rejected_after_renewal() {
+        let node_hash = identity_hash(&generate_identity());
+        let id_b = generate_identity();
+        let target = identity_hash(&generate_identity());
+        let expires = now_unix() + 86_400;
+
+        let initial = build_certificate(
+            id_b.pallas_sk,
+            node_hash,
+            now_unix(),
+            expires,
+            42,
+            [7u8; 24],
+        )
+        .unwrap();
+        // Built under the initial grant's challenge.
+        let old_instruction = build_routing_instruction(
+            id_b.pallas_sk,
+            node_hash,
+            target,
+            initial.pow_challenge,
+            new_client_nonce(),
+        )
+        .unwrap();
+        let table = table_with(initial.clone(), 1);
+
+        let renewal = build_certificate(
+            id_b.pallas_sk,
+            node_hash,
+            now_unix(),
+            expires + 3600,
+            43,
+            [8u8; 24],
+        )
+        .unwrap();
+        // Renewal preserves the hidden-service identity, so both grants address the same route key.
+        assert_eq!(renewal.hs_hash, initial.hs_hash);
+        // A fresh challenge establishes that this is a distinct grant ceremony.
+        assert_ne!(renewal.pow_challenge, initial.pow_challenge);
+        // The renewed certificate carries a newly generated proof, not the initial certificate's proof.
+        assert_ne!(renewal.proof, initial.proof);
+        // Session 2 supersedes the initial grant before the old instruction is replayed.
+        assert!(commit_grant(&table, renewal.clone(), 2));
+
+        let node_list: NodeList = Arc::new(Mutex::new(HashMap::new()));
+        node_list.lock().unwrap().insert(target, addr(9131));
+        let seen = no_nonces();
+
+        // An instruction created under session 1 must not authorize routing under the renewed grant.
+        // Node A checks it against the challenge it issued on the renewal connection.
+        assert!(
+            accept_instruction(
+                &old_instruction,
+                renewal.hs_hash,
+                node_hash,
+                &node_list,
+                &seen,
+                renewal.pow_challenge,
+            )
+            .is_none(),
+            "an instruction proved for the initial grant was accepted for its renewal"
+        );
+
+        // The renewal's own instruction still works, so the fix rejects replays
+        // rather than routing changes as such.
+        let fresh_instruction = build_routing_instruction(
+            id_b.pallas_sk,
+            node_hash,
+            target,
+            renewal.pow_challenge,
+            new_client_nonce(),
+        )
+        .unwrap();
+        assert!(
+            accept_instruction(
+                &fresh_instruction,
+                renewal.hs_hash,
+                node_hash,
+                &node_list,
+                &seen,
+                renewal.pow_challenge,
+            )
+            .is_some()
+        );
+
+        assert_eq!(
+            attach_route(&table, renewal.hs_hash, target, addr(9131), 2, now_unix()),
+            AttachOutcome::Attached(expires + 3600)
+        );
+    }
+
+    #[test]
+    fn a_reissued_challenge_does_not_admit_the_old_instruction() {
+        // a malicious RDV node can reissue a previous challenge instead of
+        // calling create_challenge. Node B solves whatever it is sent, and
+        // under a challenge-only binding the old instruction rebuilt the same
+        // slot-3 value and verified against the new grant.
+        //
+        // The client nonce fixes: the old instruction's binding holds the
+        // nonce Node B generated on the earlier connection, and Node A has
+        // already admitted it
+        let node_hash = identity_hash(&generate_identity());
+        let id_b = generate_identity();
+        let target = identity_hash(&generate_identity());
+        let replayed_challenge = 42u128;
+
+        let old_instruction = build_routing_instruction(
+            id_b.pallas_sk,
+            node_hash,
+            target,
+            replayed_challenge,
+            new_client_nonce(),
+        )
+        .unwrap();
+
+        let node_list: NodeList = Arc::new(Mutex::new(HashMap::new()));
+        node_list.lock().unwrap().insert(target, addr(9131));
+        let seen = no_nonces();
+
+        // First connection: the instruction is honest and accepted
+        assert!(
+            accept_instruction(
+                &old_instruction,
+                old_instruction.hs_hash,
+                node_hash,
+                &node_list,
+                &seen,
+                replayed_challenge,
+            )
+            .is_some(),
+            "the instruction's own first use must be accepted"
+        );
+
+        // Node A reissues the same challenge on a later connection and replays
+        // the instruction. The proof still verifies so the nonce
+        // stands between the replay and acceptance
+        assert!(
+            verify_routing_instruction(&old_instruction, replayed_challenge),
+            "the proof is expected to verify; the nonce, not the proof, rejects this"
+        );
+        assert!(
+            accept_instruction(
+                &old_instruction,
+                old_instruction.hs_hash,
+                node_hash,
+                &node_list,
+                &seen,
+                replayed_challenge,
+            )
+            .is_none(),
+            "an instruction was accepted twice under a reissued challenge"
+        );
+
+        // A nonce cannot be freed by swapping it: any other value breaks
+        // the proof, because the binding it was proved under is gone
+        let mut relabelled = old_instruction.clone();
+        relabelled.client_nonce = new_client_nonce();
+        assert!(
+            accept_instruction(
+                &relabelled,
+                relabelled.hs_hash,
+                node_hash,
+                &node_list,
+                &seen,
+                replayed_challenge,
+            )
+            .is_none(),
+            "relabelling the nonce got a replayed instruction accepted"
+        );
+    }
+
+    #[test]
+    fn instructions_for_one_route_are_separated_by_their_binding() {
+        // The hash fields of two instructions for the same route are identical.
+        // What separates them is the binding in the instance vector: the
+        // challenge Node A issued and the nonce Node B generated. Here
+        // nonces are held equal so the challenge is the only difference.
+        let node_hash = identity_hash(&generate_identity());
+        let id_b = generate_identity();
+        let target = identity_hash(&generate_identity());
+        let nonce = new_client_nonce();
+
+        let old_instruction =
+            build_routing_instruction(id_b.pallas_sk, node_hash, target, 42, nonce).unwrap();
+        let fresh_instruction =
+            build_routing_instruction(id_b.pallas_sk, node_hash, target, 43, nonce).unwrap();
+
+        // plaintext fields are identical
+        assert_eq!(old_instruction.hs_hash, fresh_instruction.hs_hash);
+        assert_eq!(
+            old_instruction.rdv_node_hash,
+            fresh_instruction.rdv_node_hash
+        );
+        assert_eq!(
+            old_instruction.target_node_hash,
+            fresh_instruction.target_node_hash
+        );
+        assert_eq!(old_instruction.client_nonce, fresh_instruction.client_nonce);
+
+        let node_list: NodeList = Arc::new(Mutex::new(HashMap::new()));
+        node_list.lock().unwrap().insert(target, addr(9131));
+        let hs = old_instruction.hs_hash;
+
+        // Under challenge 43 only the instruction built for it is accepted.
+        // Each check gets its own seen-set: the shared nonce would otherwise
+        // make the second acceptance a replay, which is a different test.
+        assert!(
+            accept_instruction(
+                &old_instruction,
+                hs,
+                node_hash,
+                &node_list,
+                &no_nonces(),
+                43
+            )
+            .is_none()
+        );
+        assert!(
+            accept_instruction(
+                &fresh_instruction,
+                hs,
+                node_hash,
+                &node_list,
+                &no_nonces(),
+                43
+            )
+            .is_some()
+        );
+        // and symmetrically under challenge 42
+        assert!(
+            accept_instruction(
+                &old_instruction,
+                hs,
+                node_hash,
+                &node_list,
+                &no_nonces(),
+                42
+            )
+            .is_some()
+        );
+        assert!(
+            accept_instruction(
+                &fresh_instruction,
+                hs,
+                node_hash,
+                &node_list,
+                &no_nonces(),
+                42
+            )
+            .is_none()
+        );
+    }
+
+    // claim_nonce
+
+    #[test]
+    fn a_nonce_is_admitted_once() {
+        let seen = no_nonces();
+        let nonce = new_client_nonce();
+        assert!(claim_nonce(&seen, nonce));
+        assert!(!claim_nonce(&seen, nonce));
+        // A different nonce is unaffected
+        assert!(claim_nonce(&seen, new_client_nonce()));
+    }
+
+    #[test]
+    fn the_seen_set_wraps_instead_of_growing_without_bound() {
+        // The set is bounded, so a node can't hold nonces until it
+        // runs out of memory. Wrapping loses replay detection for cleared
+        let seen = no_nonces();
+        for i in 0..MAX_SEEN_NONCES {
+            let mut nonce = [0u8; CLIENT_NONCE_LEN];
+            nonce[..8].copy_from_slice(&(i as u64).to_le_bytes());
+            assert!(claim_nonce(&seen, nonce));
+        }
+        assert_eq!(seen.lock().unwrap().len(), MAX_SEEN_NONCES);
+
+        // The next distinct nonce clears the set rather than extending it
+        assert!(claim_nonce(&seen, [0xffu8; CLIENT_NONCE_LEN]));
+        assert_eq!(seen.lock().unwrap().len(), 1);
+
+        // A nonce already held at the limit is still rejected: the set is only
+        // cleared to make room for one it does not have
+        let seen = no_nonces();
+        for i in 0..MAX_SEEN_NONCES {
+            let mut nonce = [0u8; CLIENT_NONCE_LEN];
+            nonce[..8].copy_from_slice(&(i as u64).to_le_bytes());
+            claim_nonce(&seen, nonce);
+        }
+        assert!(!claim_nonce(&seen, [0u8; CLIENT_NONCE_LEN]));
+        assert_eq!(seen.lock().unwrap().len(), MAX_SEEN_NONCES);
     }
 
     // commit_grant  / attach_route / prune_expired

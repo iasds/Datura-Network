@@ -285,6 +285,10 @@ So in our above example we get the following result if Node A asks nodes S, T an
 
 Thanks to this mechanism, Node A is able to receive traffic meant for it's own hidden service, from it's designated rendezvous node(s) back to itself, **without revealing to neither Nodes S, T, or U that the requests are meant for the hidden service whose hash is 44AWDAWDSWA.**
 
+TODO: the protocol must ensure that this cannot be abused, a malicious hidden service / client must not be able to create a 2 hop or 3 hop loop, ex:
+- A -> B -> C -> B -> C (looping traffic from B to C)
+- A -> B -> C -> D -> B -> C -> D (looping traffic from B to C to D)
+
 ## Hidden Services are told where to route responses back to a rendezvous node chosen by the clients:
 
 ![alt text](image-20.png)
